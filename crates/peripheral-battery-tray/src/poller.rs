@@ -3,6 +3,7 @@
 //! to the log file.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -14,7 +15,6 @@ use chrono::{DateTime, Local};
 use logitech_battery::HidApi;
 
 const ASUS_VID: u16 = 0x0B05;
-const LOGITECH_VID: u16 = 0x046D;
 
 /// A drop larger than this between two readings, while not charging, is held back until the
 /// next reading confirms it: a G502 X reported 50% for one reading after being unplugged
@@ -123,7 +123,7 @@ pub fn spawn(
             rog: Vec::new(),
             rog_paths: Vec::new(),
             logitech: Vec::new(),
-            logitech_paths: Vec::new(),
+            logitech_pairings: Vec::new(),
             shown: HashMap::new(),
             doubted: HashSet::new(),
             log: None,
@@ -139,8 +139,8 @@ struct Poller {
     /// The ASUS HID paths present at the last ROG discovery.
     rog_paths: Vec<String>,
     logitech: Vec<logitech_battery::Device>,
-    /// The Logitech HID paths present at the last Logitech discovery.
-    logitech_paths: Vec<String>,
+    /// The receiver pairings present at the last Logitech discovery.
+    logitech_pairings: Vec<(CString, u8)>,
     /// Each device's last battery percentage passed on to the tray.
     shown: HashMap<DeviceKey, u8>,
     /// Devices whose last reading was a sudden drop that was held back.
@@ -188,10 +188,11 @@ impl Poller {
             self.rog = rog_battery::discover(&self.api);
             self.rog_paths = rog_paths;
         }
-        let logitech_paths = self.paths(LOGITECH_VID);
-        if self.logitech.is_empty() || logitech_paths != self.logitech_paths {
+        // A device paired to a receiver already plugged in changes no HID path.
+        let logitech_pairings = logitech_battery::pairings(&self.api);
+        if self.logitech.is_empty() || logitech_pairings != self.logitech_pairings {
             self.logitech = logitech_battery::discover(&self.api);
-            self.logitech_paths = logitech_paths;
+            self.logitech_pairings = logitech_pairings;
         }
         if self.rog.is_empty() && self.logitech.is_empty() {
             self.log_line("no supported device found");

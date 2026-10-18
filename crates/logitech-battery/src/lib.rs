@@ -291,26 +291,8 @@ fn voltage_percent(millivolts: u16) -> u8 {
 /// Finds every device paired to a supported receiver, including one that is switched off:
 /// it reads as asleep until it answers.
 pub fn discover(api: &HidApi) -> Vec<Device> {
-    let logitech: Vec<&DeviceInfo> = api
-        .device_list()
-        .filter(|info| info.vendor_id() == LOGITECH_VID)
-        .collect();
     let mut devices = Vec::new();
-    for short in &logitech {
-        let Some(&(_, connection)) = RECEIVERS.iter().find(|(pid, _)| *pid == short.product_id())
-        else {
-            continue;
-        };
-        if !is_collection(short, SHORT_USAGE) {
-            continue;
-        }
-        let Some(long) = logitech.iter().find(|info| {
-            info.product_id() == short.product_id()
-                && is_collection(info, LONG_USAGE)
-                && instance(info.path()) == instance(short.path())
-        }) else {
-            continue;
-        };
+    for (connection, short, long) in receivers(api) {
         let Ok(channel) = Channel::open(api, short.path(), long.path()) else {
             continue;
         };
@@ -351,6 +333,47 @@ pub fn discover(api: &HidApi) -> Vec<Device> {
         )
     });
     devices
+}
+
+/// Every paired slot of every supported receiver, as its receiver path and slot. Only the
+/// receivers are asked, so nothing goes over the air; the list changes when a device is
+/// paired or unpaired, or a receiver is plugged in or removed.
+pub fn pairings(api: &HidApi) -> Vec<(CString, u8)> {
+    let mut pairings = Vec::new();
+    for (connection, short, long) in receivers(api) {
+        let Ok(channel) = Channel::open(api, short.path(), long.path()) else {
+            continue;
+        };
+        for index in SLOTS {
+            if let Ok(Some(_)) = paired_name(&channel, connection, index) {
+                pairings.push((short.path().to_owned(), index));
+            }
+        }
+    }
+    pairings
+}
+
+/// Each supported receiver's connection and its short and long HID++ collections.
+fn receivers(api: &HidApi) -> Vec<(Connection, &DeviceInfo, &DeviceInfo)> {
+    let logitech: Vec<&DeviceInfo> = api
+        .device_list()
+        .filter(|info| info.vendor_id() == LOGITECH_VID)
+        .collect();
+    logitech
+        .iter()
+        .filter(|short| is_collection(short, SHORT_USAGE))
+        .filter_map(|short| {
+            let &(_, connection) = RECEIVERS
+                .iter()
+                .find(|(pid, _)| *pid == short.product_id())?;
+            let long = logitech.iter().find(|info| {
+                info.product_id() == short.product_id()
+                    && is_collection(info, LONG_USAGE)
+                    && instance(info.path()) == instance(short.path())
+            })?;
+            Some((connection, *short, *long))
+        })
+        .collect()
 }
 
 fn is_collection(info: &DeviceInfo, usage: u16) -> bool {

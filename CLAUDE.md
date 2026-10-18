@@ -17,9 +17,9 @@ starting with ASUS ROG and Logitech. It is a Cargo workspace:
 
 ## Project exceptions
 
-- Planned work and progress live in the maintainer's untracked `PLAN.local.md`, not in
-  GitHub issues. Read it before starting work when it is present; do not open issues for
-  planned work.
+- Larger planned work is a GitHub issue. Smaller items that wait on hardware, observation
+  or an upstream release live in the maintainer's untracked `BACKLOG.local.md`. Read both
+  before starting work when they are present.
 - The repository is public. Only the maintainer decides its visibility; never change it.
 
 ## Device rules
@@ -117,5 +117,6 @@ Run before committing; CI runs the same on pull requests:
 ```sh
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
 cargo build --locked --workspace --release
 ```

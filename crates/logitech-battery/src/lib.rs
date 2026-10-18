@@ -1,7 +1,8 @@
 //! Battery queries for Logitech wireless peripherals over HID++.
 //!
 //! Only query commands are ever sent; nothing here writes a device setting or a receiver
-//! register.
+//! register. The protocol facts come from Solaar's `lib/logitech_receiver` (`base.py`,
+//! `hidpp10_constants.py`, `hidpp20.py`, `hidpp20_constants.py`, `receiver.py`).
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString};
@@ -211,6 +212,9 @@ impl Device {
     }
 }
 
+/// The charging status of `0x1000` and `0x1004` is `0` discharging, `1` recharging, `2` almost
+/// full, `3` full, `4` slow recharge, `5` invalid battery, `6` thermal error; `1` to `4` mean
+/// external power is charging or holding the battery.
 fn decode(feature: BatteryFeature, data: &[u8]) -> Reading {
     match feature {
         BatteryFeature::Unified => {

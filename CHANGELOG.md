@@ -10,6 +10,8 @@ on `main`, with the matching section below as its notes.
 ### Added
 
 - `--once` prints the battery of each ROG and Logitech device found.
+- Logitech devices on Lightspeed, Unifying and Bolt receivers, untested beyond Lightspeed.
+- The card marks a battery estimated from voltage with `≈`.
 - Tray icon per device showing battery digits, coloured when low or charging.
 - A sleeping or switched-off device shows its last battery reading, greyed out.
 - Grey crossed-out battery icon when no supported device is found.

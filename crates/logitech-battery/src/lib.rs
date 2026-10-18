@@ -42,6 +42,8 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(2);
 const HIDPP10_ERROR: u8 = 0x8F;
 /// HID++ 2.0 error reply feature index, sent by the device itself.
 const HIDPP20_ERROR: u8 = 0xFF;
+/// The HID++ 1.0 error a device that only speaks HID++ 1.0 gives to a HID++ 2.0 request.
+const ERR_INVALID_SUB_ID: u8 = 0x01;
 
 /// HID++ 1.0 long register read, and the receiver information register it reads. Its
 /// sub-register `0x40 + slot - 1` (Bolt: `0x60 + slot`, then `0x01`) holds the shortened
@@ -316,9 +318,12 @@ pub fn discover(api: &HidApi) -> Vec<Device> {
             let Ok(Some(paired)) = paired_name(&channel, connection, index) else {
                 continue;
             };
+            // A device that answers without a battery feature, or only speaks HID++ 1.0,
+            // has nothing to show; one that is unreachable is listed until it answers.
             let battery = match battery_feature(&channel, index) {
-                Ok(Answer::Reply(battery)) => battery,
-                _ => None,
+                Ok(Answer::Reply(Some(battery))) => Some(battery),
+                Ok(Answer::Unreachable) => None,
+                _ => continue,
             };
             let name = match battery {
                 Some(_) => device_name(&channel, index).ok().flatten(),
@@ -430,7 +435,8 @@ enum Answer<T> {
     /// The receiver answered that the device in that slot is off, asleep or not paired, or
     /// nothing answered in time.
     Unreachable,
-    /// The device rejected the request with this HID++ 2.0 error code.
+    /// The device rejected the request with this HID++ 2.0 error code, or does not speak
+    /// HID++ 2.0 at all (`ERR_INVALID_SUB_ID`).
     Failed(u8),
 }
 
@@ -497,7 +503,10 @@ impl Channel {
                 let reply = &buf[..n];
                 match reply[2] {
                     HIDPP10_ERROR if reply[3..5] == header[1..] => {
-                        return Ok(Answer::Unreachable);
+                        return Ok(match reply[5] {
+                            ERR_INVALID_SUB_ID => Answer::Failed(ERR_INVALID_SUB_ID),
+                            _ => Answer::Unreachable,
+                        });
                     }
                     HIDPP20_ERROR if reply[3..5] == header[1..] => {
                         return Ok(Answer::Failed(reply[5]));

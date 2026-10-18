@@ -47,6 +47,8 @@ pub struct Panel {
     pub connection: String,
     /// `None` when nothing has been read from the device yet.
     pub percent: Option<u8>,
+    /// Shown with `≈`: derived from a voltage or a coarse level.
+    pub estimated: bool,
     pub tone: Tone,
     pub status: String,
 }
@@ -384,8 +386,12 @@ fn rect(left: i32, top: i32, (width, height): (i32, i32)) -> RECT {
     }
 }
 
-fn percent_text(percent: Option<u8>) -> String {
-    percent.map_or_else(|| "—".to_owned(), |p| format!("{p}%"))
+fn percent_text(panel: &Panel) -> String {
+    match panel.percent {
+        None => "—".to_owned(),
+        Some(p) if panel.estimated => format!("≈{p}%"),
+        Some(p) => format!("{p}%"),
+    }
 }
 
 fn layout(dc: HDC, fonts: &Fonts, card: &Card, dpi: u32) -> Layout {
@@ -404,7 +410,7 @@ fn layout(dc: HDC, fonts: &Fonts, card: &Card, dpi: u32) -> Layout {
         .map(|panel| {
             (
                 size(fonts.name, &panel.name),
-                size(fonts.percent, &percent_text(panel.percent)),
+                size(fonts.percent, &percent_text(panel)),
                 size(fonts.small, &panel.connection),
                 size(fonts.small, &panel.status),
             )
@@ -697,7 +703,7 @@ fn paint(hwnd: HWND) {
             };
             text(
                 dc,
-                &percent_text(panel.percent),
+                &percent_text(panel),
                 at.percent,
                 fonts.percent,
                 percent_colour,

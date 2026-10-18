@@ -67,6 +67,7 @@ enum View {
     Live {
         percent: u8,
         charging: bool,
+        estimated: bool,
     },
     /// The device is asleep; its battery barely moves then, so its last reading stands.
     Asleep {
@@ -499,7 +500,10 @@ impl Tray {
             .map(|d| d.name.as_str())
             .collect();
         for device in &snapshot.devices {
-            let Reading::Battery { percent, charging } = device.reading else {
+            let Reading::Battery {
+                percent, charging, ..
+            } = device.reading
+            else {
                 continue;
             };
             let alerts = self.alerts.entry(device.name.clone()).or_insert(Alerts {
@@ -670,7 +674,15 @@ impl Tray {
 
     fn view(&self, device: &DeviceStatus) -> View {
         match device.reading {
-            Reading::Battery { percent, charging } => View::Live { percent, charging },
+            Reading::Battery {
+                percent,
+                charging,
+                estimated,
+            } => View::Live {
+                percent,
+                charging,
+                estimated,
+            },
             Reading::Asleep => match self
                 .last_read
                 .get(&(device.name.clone(), device.connection))
@@ -684,7 +696,9 @@ impl Tray {
     fn face(&self, view: View) -> Face {
         let low = |percent| self.settings.low_threshold().is_some_and(|t| percent <= t);
         match view {
-            View::Live { percent, charging } => Face::Level {
+            View::Live {
+                percent, charging, ..
+            } => Face::Level {
                 percent,
                 charging,
                 low: low(percent),
@@ -809,7 +823,9 @@ fn submenu<'a>(text: &str, items: impl IntoIterator<Item = &'a CheckMenuItem>) -
 /// The greyed row under a device's name in the menu.
 fn row_detail(strings: &Strings, device: &DeviceStatus, view: View) -> String {
     let battery = match view {
-        View::Live { percent, charging } => strings.row_status(percent, charging),
+        View::Live {
+            percent, charging, ..
+        } => strings.row_status(percent, charging),
         View::Asleep { percent, .. } => strings.row_asleep(percent),
         View::Unknown => strings.no_response.to_owned(),
     };
@@ -826,8 +842,14 @@ fn card(
     let panels = devices
         .iter()
         .map(|&(d, view)| {
+            let mut estimated = false;
             let (percent, tone, status) = match view {
-                View::Live { percent, charging } => {
+                View::Live {
+                    percent,
+                    charging,
+                    estimated: approximate,
+                } => {
+                    estimated = approximate;
                     let tone = if charging {
                         Tone::Charging
                     } else if low(percent) {
@@ -848,6 +870,7 @@ fn card(
                 name: d.name.clone(),
                 connection: strings.connection_detail(d.connection),
                 percent,
+                estimated,
                 tone,
                 status,
             }

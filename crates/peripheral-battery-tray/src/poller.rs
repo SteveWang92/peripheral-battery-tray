@@ -40,6 +40,8 @@ pub enum Reading {
     Battery {
         percent: u8,
         charging: bool,
+        /// Derived from a voltage or a coarse level rather than reported by the device.
+        estimated: bool,
     },
     /// The device is asleep, off or out of range.
     Asleep,
@@ -48,9 +50,11 @@ pub enum Reading {
 impl From<rog_battery::Reading> for Reading {
     fn from(reading: rog_battery::Reading) -> Self {
         match reading {
-            rog_battery::Reading::Battery { percent, charging } => {
-                Reading::Battery { percent, charging }
-            }
+            rog_battery::Reading::Battery { percent, charging } => Reading::Battery {
+                percent,
+                charging,
+                estimated: false,
+            },
             rog_battery::Reading::Asleep => Reading::Asleep,
         }
     }
@@ -60,8 +64,14 @@ impl From<logitech_battery::Reading> for Reading {
     fn from(reading: logitech_battery::Reading) -> Self {
         match reading {
             logitech_battery::Reading::Battery {
-                percent, charging, ..
-            } => Reading::Battery { percent, charging },
+                percent,
+                charging,
+                estimated,
+            } => Reading::Battery {
+                percent,
+                charging,
+                estimated,
+            },
             logitech_battery::Reading::Asleep => Reading::Asleep,
         }
     }
@@ -232,7 +242,12 @@ impl Poller {
     /// Holds back a sudden drop until a second reading in a row shows it, passing on the
     /// last percentage meanwhile.
     fn steady(&mut self, mut status: DeviceStatus) -> DeviceStatus {
-        let Reading::Battery { percent, charging } = status.reading else {
+        let Reading::Battery {
+            percent,
+            charging,
+            estimated,
+        } = status.reading
+        else {
             return status;
         };
         let key = (status.name.clone(), status.connection);
@@ -248,6 +263,7 @@ impl Poller {
             status.reading = Reading::Battery {
                 percent: shown,
                 charging,
+                estimated,
             };
         } else {
             self.doubted.remove(&key);

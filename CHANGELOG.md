@@ -7,4 +7,8 @@ on `main`, with the matching section below as its notes.
 
 ## [Unreleased]
 
+### Added
+
+- `--once` prints the battery of each ROG and Logitech device found.
+
 [Unreleased]: https://github.com/SteveWang92/peripheral-battery-tray/commits/dev

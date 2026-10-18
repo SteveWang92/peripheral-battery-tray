@@ -341,8 +341,15 @@ pub fn discover(api: &HidApi) -> Vec<Device> {
         }
     }
     // HID enumeration order can change after a replug; callers that show one entry per
-    // device get the same order every time.
-    devices.sort_by_cached_key(|device| (device.name(), device.connection));
+    // device get the same order every time, identical devices included.
+    devices.sort_by_cached_key(|device| {
+        (
+            device.name(),
+            device.connection,
+            device.short_path.clone(),
+            device.index,
+        )
+    });
     devices
 }
 

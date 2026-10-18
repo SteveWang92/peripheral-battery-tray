@@ -10,6 +10,7 @@ on `main`, with the matching section below as its notes.
 ### Fixed
 
 - "Start with Windows" stays off when the settings file cannot be saved.
+- Identical devices on the same connection each keep their own battery reading.
 
 ## [0.1.0] - 2026-10-18
 

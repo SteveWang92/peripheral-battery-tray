@@ -80,8 +80,20 @@ impl From<logitech_battery::Reading> for Reading {
 pub struct DeviceStatus {
     pub name: String,
     pub connection: Connection,
+    /// How many devices before this one in the snapshot share its name and connection, so
+    /// identical devices keep apart.
+    pub instance: usize,
     /// A failed query counts as not responding; its error goes to the log.
     pub reading: Reading,
+}
+
+/// Identifies one device across snapshots.
+pub type DeviceKey = (String, Connection, usize);
+
+impl DeviceStatus {
+    pub fn key(&self) -> DeviceKey {
+        (self.name.clone(), self.connection, self.instance)
+    }
 }
 
 pub struct Snapshot {
@@ -130,9 +142,9 @@ struct Poller {
     /// The Logitech HID paths present at the last Logitech discovery.
     logitech_paths: Vec<String>,
     /// Each device's last battery percentage passed on to the tray.
-    shown: HashMap<(String, Connection), u8>,
+    shown: HashMap<DeviceKey, u8>,
     /// Devices whose last reading was a sudden drop that was held back.
-    doubted: HashSet<(String, Connection)>,
+    doubted: HashSet<DeviceKey>,
     log: Option<File>,
 }
 
@@ -202,9 +214,10 @@ impl Poller {
             let status = DeviceStatus {
                 name: name.to_owned(),
                 connection: Connection::Rog(connection),
+                instance: 0,
                 reading: result.map_or(Reading::Asleep, Reading::from),
             };
-            devices.push(self.steady(status));
+            devices.push(self.steady(numbered(status, &devices)));
         }
         let mut logitech_failed = false;
         for i in 0..self.logitech.len() {
@@ -223,9 +236,10 @@ impl Poller {
             let status = DeviceStatus {
                 name,
                 connection: Connection::Logitech(connection),
+                instance: 0,
                 reading: result.map_or(Reading::Asleep, Reading::from),
             };
-            devices.push(self.steady(status));
+            devices.push(self.steady(numbered(status, &devices)));
         }
         if rog_failed {
             self.rog.clear();
@@ -250,7 +264,7 @@ impl Poller {
         else {
             return status;
         };
-        let key = (status.name.clone(), status.connection);
+        let key = status.key();
         let held = self.shown.get(&key).copied().filter(|&shown| {
             !charging && shown.saturating_sub(percent) > SUDDEN_DROP && !self.doubted.contains(&key)
         });
@@ -304,4 +318,13 @@ fn open_log() -> Option<File> {
     let path = log_path()?;
     fs::create_dir_all(path.parent()?).ok()?;
     OpenOptions::new().create(true).append(true).open(path).ok()
+}
+
+/// Sets `status.instance` from the devices already in the snapshot.
+fn numbered(mut status: DeviceStatus, before: &[DeviceStatus]) -> DeviceStatus {
+    status.instance = before
+        .iter()
+        .filter(|d| d.name == status.name && d.connection == status.connection)
+        .count();
+    status
 }

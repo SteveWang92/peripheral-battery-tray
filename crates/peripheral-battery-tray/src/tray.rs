@@ -31,7 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::config::{self, Loaded, Settings};
 use crate::icon::{self, Face};
-use crate::poller::{self, Command, Connection, DeviceStatus, Reading, Snapshot};
+use crate::poller::{self, Command, DeviceKey, DeviceStatus, Reading, Snapshot};
 use crate::popup::{self, Anchor, Card, Panel, Tone};
 use crate::strings::{Language, Strings};
 use crate::system;
@@ -155,7 +155,7 @@ struct Tray {
     /// connection than the receiver it drains on.
     alerts: HashMap<String, Alerts>,
     /// Each device's last battery reading and when it was taken.
-    last_read: HashMap<(String, Connection), (u8, DateTime<Local>)>,
+    last_read: HashMap<DeviceKey, (u8, DateTime<Local>)>,
     /// Set while a menu is showing: the menu and the icons it belongs to cannot be replaced
     /// then, so such changes wait for it to close.
     menu_open: bool,
@@ -425,10 +425,7 @@ impl Tray {
             self.raise_alerts(&snapshot);
             for device in &snapshot.devices {
                 if let Reading::Battery { percent, .. } = device.reading {
-                    self.last_read.insert(
-                        (device.name.clone(), device.connection),
-                        (percent, snapshot.at),
-                    );
+                    self.last_read.insert(device.key(), (percent, snapshot.at));
                 }
             }
             self.snapshot = Some(snapshot);
@@ -686,10 +683,7 @@ impl Tray {
                 charging,
                 estimated,
             },
-            Reading::Asleep => match self
-                .last_read
-                .get(&(device.name.clone(), device.connection))
-            {
+            Reading::Asleep => match self.last_read.get(&device.key()) {
                 Some(&(percent, read_at)) => View::Asleep { percent, read_at },
                 None => View::Unknown,
             },

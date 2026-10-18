@@ -1,0 +1,11 @@
+[package]
+name = "peripheral-battery-tray"
+version = "0.0.0"
+description = "Windows tray battery monitor for ASUS ROG and Logitech wireless peripherals"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+logitech-battery = { path = "../logitech-battery" }
+rog-battery = { git = "https://github.com/SteveWang92/rog-battery-tray", tag = "v0.1.0" }

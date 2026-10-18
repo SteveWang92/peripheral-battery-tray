@@ -1,0 +1,57 @@
+name: CI
+
+# Base-branch filter: pull_request fires on the PR's target branch, so this runs on every
+# pull request into dev, on the dev->main release PR, and on the merge commit that lands on
+# main. A Windows runner bills at twice the wall clock, so a push to dev is not covered:
+# work committed straight to dev is gated by the local checks CLAUDE.md lists.
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [main]
+
+# One run per commit: a newer push to a branch cancels its in-flight run. main is exempt so
+# a release commit's check always completes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The tray application is Windows-only and hidapi uses the Windows HID backend, so the
+  # workspace is verified on a Windows runner.
+  verify:
+    name: Format, lint and build
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Cache Rust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --locked --workspace --release

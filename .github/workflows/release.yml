@@ -1,0 +1,70 @@
+name: Release executable
+
+# The executable is built from the published tag rather than from a branch, so what people
+# download is the tree the release notes describe. Publishing the release is still a manual
+# step; this workflow only attaches the executable to it afterwards. The dispatch form exists
+# for a release whose build failed.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and attach the executable to
+        required: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build the Windows executable
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Build
+        run: cargo build --locked --package peripheral-battery-tray --release
+
+      - name: Store the executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-executable
+          path: target/release/peripheral-battery-tray.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  attach:
+    name: Attach the executable to the release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download the executable
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-executable
+          path: executable
+
+      # The file name carries no version: autostart points at the executable's path, so an
+      # update that replaces the file in place keeps starting with Windows. The executable
+      # is unsigned; the README tells people what SmartScreen shows for it.
+      - name: Attach it to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # This job checks nothing out, so gh has no repository to infer from.
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" executable/peripheral-battery-tray.exe --clobber

@@ -1,0 +1,27 @@
+{
+  // Shared workspace settings, committed so that every editor formats this repository the
+  // way CI checks it.
+
+  // Rust is formatted by rustfmt through rust-analyzer, which reads rustfmt.toml.
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
+  },
+  "rust-analyzer.check.command": "clippy",
+
+  // Nothing in this repository formats these, so saving must not hand them to whichever
+  // extension happens to claim them. The documentation in particular is wrapped by hand.
+  "[markdown]": {
+    "editor.formatOnSave": false,
+    "files.trimTrailingWhitespace": false
+  },
+  "[json]": { "editor.formatOnSave": false },
+  "[jsonc]": { "editor.formatOnSave": false },
+  "[yaml]": { "editor.formatOnSave": false },
+  "[toml]": { "editor.formatOnSave": false },
+
+  // Match .gitattributes and .editorconfig without depending on an extension.
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true
+}

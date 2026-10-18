@@ -3,6 +3,7 @@
 
 mod app_icon;
 mod config;
+mod discharge;
 mod icon;
 mod poller;
 mod popup;

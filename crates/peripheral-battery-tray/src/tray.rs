@@ -68,6 +68,7 @@ enum View {
         percent: u8,
         charging: bool,
         estimated: bool,
+        remaining: Option<Duration>,
     },
     /// The device is asleep; its battery barely moves then, so its last reading stands.
     Asleep {
@@ -684,6 +685,7 @@ impl Tray {
                 percent,
                 charging,
                 estimated,
+                remaining: device.remaining,
             },
             Reading::Asleep => match self.last_read.get(&device.key()) {
                 Some(&(percent, read_at)) => View::Asleep { percent, read_at },
@@ -847,6 +849,7 @@ fn card(
                     percent,
                     charging,
                     estimated: approximate,
+                    remaining,
                 } => {
                     estimated = approximate;
                     let tone = if charging {
@@ -856,7 +859,11 @@ fn card(
                     } else {
                         Tone::Normal
                     };
-                    (Some(percent), tone, strings.live_status(charging, time))
+                    (
+                        Some(percent),
+                        tone,
+                        strings.live_status(charging, remaining, time),
+                    )
                 }
                 View::Asleep { percent, read_at } => (
                     Some(percent),

@@ -85,6 +85,9 @@ starting with ASUS ROG and Logitech. It is a Cargo workspace:
   The `--once` output and its errors are English only.
 - The battery log is diagnostic: off by default, switched from the menu, written to
   `%LOCALAPPDATA%\peripheral-battery-tray\battery.log`.
+- The card's time-left estimate comes from each device's drain since its last charge, which
+  the poller keeps in `%LOCALAPPDATA%\peripheral-battery-tray\history.toml` so it survives
+  restarts (`discharge.rs`).
 
 ## Development
 

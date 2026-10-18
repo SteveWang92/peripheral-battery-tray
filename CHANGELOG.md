@@ -7,6 +7,10 @@ on `main`, with the matching section below as its notes.
 
 ## [Unreleased]
 
+### Added
+
+- The card estimates each device's time left on battery from its recent drain.
+
 ### Fixed
 
 - Identical ROG devices each keep their own battery reading.

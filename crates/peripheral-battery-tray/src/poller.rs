@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Local};
 use logitech_battery::{HidApi, HidError};
 
+use crate::discharge::History;
+
 const ASUS_VID: u16 = 0x0B05;
 
 /// A drop larger than this between two readings, while not charging, is held back until the
@@ -86,6 +88,8 @@ pub struct DeviceStatus {
     pub id: String,
     /// A failed query counts as not responding; its error goes to the log.
     pub reading: Reading,
+    /// The estimated time left on battery, once the drain since the last charge allows one.
+    pub remaining: Option<Duration>,
 }
 
 /// Identifies one device across snapshots.
@@ -182,6 +186,7 @@ fn describe<R: fmt::Display + Into<Reading>>(
             id,
             connection,
             reading: result.map_or(Reading::Asleep, Into::into),
+            remaining: None,
         },
     }
 }
@@ -216,6 +221,7 @@ pub fn spawn(
             logitech_pairings: Vec::new(),
             shown: HashMap::new(),
             doubted: HashSet::new(),
+            history: History::load(),
             log: None,
         }
         .run(interval, logging, inbox, snapshots, notify)
@@ -235,6 +241,7 @@ struct Poller {
     shown: HashMap<DeviceKey, u8>,
     /// Devices whose last reading was a sudden drop that was held back.
     doubted: HashSet<DeviceKey>,
+    history: History,
     log: Option<File>,
 }
 
@@ -304,6 +311,7 @@ impl Poller {
             let query = device.query(&self.api);
             queries.push((query, started.elapsed()));
         }
+        let at = Local::now();
         let mut devices = Vec::with_capacity(queries.len());
         for (query, elapsed) in queries {
             self.log_line(&format!("{}  [{} ms]", query.line, elapsed.as_millis()));
@@ -314,12 +322,20 @@ impl Poller {
                     Connection::Logitech(_) => self.logitech.clear(),
                 }
             }
-            devices.push(self.steady(query.status));
+            let mut status = self.steady(query.status);
+            if let Reading::Battery {
+                percent, charging, ..
+            } = status.reading
+            {
+                let device = format!("{:?} {}", status.connection, status.id);
+                status.remaining = self
+                    .history
+                    .record(&device, percent, charging, at.timestamp());
+            }
+            devices.push(status);
         }
-        Snapshot {
-            devices,
-            at: Local::now(),
-        }
+        self.history.save();
+        Snapshot { devices, at }
     }
 
     /// Holds back a sudden drop until a second reading in a row shows it, passing on the

@@ -1,5 +1,7 @@
 //! User-facing text in English and Simplified Chinese.
 
+use std::time::Duration;
+
 use crate::poller::Connection;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
@@ -53,6 +55,9 @@ pub struct Strings {
     pub card_title: &'static str,
     charging: &'static str,
     not_charging: &'static str,
+    hours_left: &'static str,
+    days_left: &'static str,
+    under_two_hours: &'static str,
     updated: &'static str,
     receiver: &'static str,
     wired: &'static str,
@@ -105,13 +110,24 @@ impl Strings {
     }
 
     /// The card's status line under a device's battery bar.
-    pub fn live_status(&self, charging: bool, time: &str) -> String {
-        let state = if charging {
-            self.charging
-        } else {
-            self.not_charging
+    /// The card's status line for a device read at `time`; one on battery shows its estimated
+    /// time left when there is one.
+    pub fn live_status(&self, charging: bool, remaining: Option<Duration>, time: &str) -> String {
+        let state = match remaining {
+            _ if charging => self.charging.to_owned(),
+            Some(remaining) => self.time_left(remaining),
+            None => self.not_charging.to_owned(),
         };
         format!("{state} · {}", self.updated_at(time))
+    }
+
+    fn time_left(&self, remaining: Duration) -> String {
+        let hours = remaining.as_secs() / 3600;
+        match hours {
+            0..2 => self.under_two_hours.to_owned(),
+            2..48 => fill(self.hours_left, &[&hours.to_string()]),
+            _ => fill(self.days_left, &[&((hours + 12) / 24).to_string()]),
+        }
     }
 
     /// The card's status line for a device asleep since its last reading at `time`.
@@ -175,6 +191,9 @@ static EN: Strings = Strings {
     card_title: "Device battery",
     charging: "charging",
     not_charging: "not charging",
+    hours_left: "about {} hours left",
+    days_left: "about {} days left",
+    under_two_hours: "under 2 hours left",
     updated: "Updated {}",
     receiver: "{} receiver",
     wired: "wired",
@@ -211,6 +230,9 @@ static ZH: Strings = Strings {
     card_title: "设备电量",
     charging: "充电中",
     not_charging: "未充电",
+    hours_left: "约剩 {} 小时",
+    days_left: "约剩 {} 天",
+    under_two_hours: "不到 2 小时",
     updated: "{} 更新",
     receiver: "{} 接收器",
     wired: "有线",

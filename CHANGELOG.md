@@ -12,7 +12,7 @@ on `main`, with the matching section below as its notes.
 ### Fixed
 
 - "Start with Windows" stays off when the settings file cannot be saved.
-- Identical devices on the same connection each keep their own battery reading.
+- Identical Logitech devices on one receiver each keep their own battery reading and alerts.
 - A Logitech device paired while the tray runs appears without replugging its receiver.
 
 ## [0.1.0] - 2026-10-18

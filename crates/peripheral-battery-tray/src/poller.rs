@@ -80,19 +80,20 @@ impl From<logitech_battery::Reading> for Reading {
 pub struct DeviceStatus {
     pub name: String,
     pub connection: Connection,
-    /// How many devices before this one in the snapshot share its name and connection, so
-    /// identical devices keep apart.
-    pub instance: usize,
+    /// Tells devices apart: the model name for ROG, whose receiver and cable entries are one
+    /// device; the receiver path and slot for Logitech, whose identical devices each have
+    /// their own slot.
+    pub id: String,
     /// A failed query counts as not responding; its error goes to the log.
     pub reading: Reading,
 }
 
 /// Identifies one device across snapshots.
-pub type DeviceKey = (String, Connection, usize);
+pub type DeviceKey = (String, Connection);
 
 impl DeviceStatus {
     pub fn key(&self) -> DeviceKey {
-        (self.name.clone(), self.connection, self.instance)
+        (self.id.clone(), self.connection)
     }
 }
 
@@ -177,9 +178,10 @@ impl Poller {
     }
 
     fn poll(&mut self) -> Snapshot {
-        // Discovery probes every candidate interface, so each brand's runs only when its set
-        // of HID interfaces changes or one of its queries failed; otherwise a round sends
-        // exactly one battery query per device.
+        // Discovery probes every device over the air, so each brand's runs only when its
+        // set of HID interfaces or receiver pairings changes, or one of its queries failed;
+        // otherwise a round sends one battery query per device, plus a pairing read per
+        // receiver slot that the receiver answers itself.
         if let Err(error) = self.api.refresh_devices() {
             self.log_line(&format!("device refresh failed: {error}"));
         }
@@ -188,11 +190,20 @@ impl Poller {
             self.rog = rog_battery::discover(&self.api);
             self.rog_paths = rog_paths;
         }
-        // A device paired to a receiver already plugged in changes no HID path.
-        let logitech_pairings = logitech_battery::pairings(&self.api);
-        if self.logitech.is_empty() || logitech_pairings != self.logitech_pairings {
+        // A device paired to a receiver already plugged in changes no HID path. Pairings
+        // that cannot be read count as unchanged.
+        let pairings = logitech_battery::pairings(&self.api);
+        if let Err(error) = &pairings {
+            self.log_line(&format!("receiver pairing read failed: {error}"));
+        }
+        let paired_anew = pairings
+            .as_ref()
+            .is_ok_and(|pairings| *pairings != self.logitech_pairings);
+        if self.logitech.is_empty() || paired_anew {
             self.logitech = logitech_battery::discover(&self.api);
-            self.logitech_pairings = logitech_pairings;
+        }
+        if let Ok(pairings) = pairings {
+            self.logitech_pairings = pairings;
         }
         if self.rog.is_empty() && self.logitech.is_empty() {
             self.log_line("no supported device found");
@@ -214,11 +225,11 @@ impl Poller {
             rog_failed |= result.is_err();
             let status = DeviceStatus {
                 name: name.to_owned(),
+                id: name.to_owned(),
                 connection: Connection::Rog(connection),
-                instance: 0,
                 reading: result.map_or(Reading::Asleep, Reading::from),
             };
-            devices.push(self.steady(numbered(status, &devices)));
+            devices.push(self.steady(status));
         }
         let mut logitech_failed = false;
         for i in 0..self.logitech.len() {
@@ -227,7 +238,7 @@ impl Poller {
             let result = device.read_battery(&self.api);
             let elapsed = started.elapsed().as_millis();
             // Read after the query: a device's first answer replaces its shortened name.
-            let (name, connection) = (device.name(), device.connection());
+            let (name, id, connection) = (device.name(), device.id(), device.connection());
             let text = match &result {
                 Ok(reading) => reading.to_string(),
                 Err(error) => format!("query failed: {error}"),
@@ -236,11 +247,11 @@ impl Poller {
             logitech_failed |= result.is_err();
             let status = DeviceStatus {
                 name,
+                id,
                 connection: Connection::Logitech(connection),
-                instance: 0,
                 reading: result.map_or(Reading::Asleep, Reading::from),
             };
-            devices.push(self.steady(numbered(status, &devices)));
+            devices.push(self.steady(status));
         }
         if rog_failed {
             self.rog.clear();
@@ -319,13 +330,4 @@ fn open_log() -> Option<File> {
     let path = log_path()?;
     fs::create_dir_all(path.parent()?).ok()?;
     OpenOptions::new().create(true).append(true).open(path).ok()
-}
-
-/// Sets `status.instance` from the devices already in the snapshot.
-fn numbered(mut status: DeviceStatus, before: &[DeviceStatus]) -> DeviceStatus {
-    status.instance = before
-        .iter()
-        .filter(|d| d.name == status.name && d.connection == status.connection)
-        .count();
-    status
 }

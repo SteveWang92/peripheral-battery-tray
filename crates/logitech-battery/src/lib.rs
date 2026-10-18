@@ -170,6 +170,12 @@ impl Device {
         self.connection
     }
 
+    /// The receiver's HID path and the device's slot on it, which tell identical devices
+    /// apart for as long as the receiver stays in the same port.
+    pub fn id(&self) -> String {
+        format!("{}#{}", self.short_path.to_string_lossy(), self.index)
+    }
+
     pub fn read_battery(&self, api: &HidApi) -> Result<Reading, HidError> {
         let channel = Channel::open(api, &self.short_path, &self.long_path)?;
         let battery = match self.battery.get() {
@@ -337,20 +343,20 @@ pub fn discover(api: &HidApi) -> Vec<Device> {
 
 /// Every paired slot of every supported receiver, as its receiver path and slot. Only the
 /// receivers are asked, so nothing goes over the air; the list changes when a device is
-/// paired or unpaired, or a receiver is plugged in or removed.
-pub fn pairings(api: &HidApi) -> Vec<(CString, u8)> {
+/// paired or unpaired, or a receiver is plugged in or removed. A receiver that cannot be read
+/// fails the whole list, since leaving it out would look like an unpairing.
+pub fn pairings(api: &HidApi) -> Result<Vec<(CString, u8)>, HidError> {
     let mut pairings = Vec::new();
     for (connection, short, long) in receivers(api) {
-        let Ok(channel) = Channel::open(api, short.path(), long.path()) else {
-            continue;
-        };
+        let channel = Channel::open(api, short.path(), long.path())?;
         for index in SLOTS {
-            if let Ok(Some(_)) = paired_name(&channel, connection, index) {
+            if paired_name(&channel, connection, index)?.is_some() {
                 pairings.push((short.path().to_owned(), index));
             }
         }
     }
-    pairings
+    pairings.sort();
+    Ok(pairings)
 }
 
 /// Each supported receiver's connection and its short and long HID++ collections.

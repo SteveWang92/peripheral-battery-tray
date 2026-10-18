@@ -7,6 +7,8 @@ on `main`, with the matching section below as its notes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-18
+
 ### Added
 
 - `--once` prints the battery of each ROG and Logitech device found.
@@ -25,4 +27,5 @@ on `main`, with the matching section below as its notes.
 - Starts with Windows by default, switchable from the menu.
 - English and Simplified Chinese, following the system language by default.
 
-[Unreleased]: https://github.com/SteveWang92/peripheral-battery-tray/commits/dev
+[Unreleased]: https://github.com/SteveWang92/peripheral-battery-tray/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/SteveWang92/peripheral-battery-tray/releases/tag/v0.1.0

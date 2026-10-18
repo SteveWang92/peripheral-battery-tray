@@ -1,6 +1,6 @@
 [package]
 name = "peripheral-battery-tray"
-version = "0.0.0"
+version = "0.1.0"
 description = "Windows tray battery monitor for ASUS ROG and Logitech wireless peripherals"
 edition.workspace = true
 license.workspace = true

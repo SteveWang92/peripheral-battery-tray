@@ -7,6 +7,10 @@ on `main`, with the matching section below as its notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Identical ROG devices each keep their own battery reading.
+
 ## [0.1.1] - 2026-10-18
 
 ### Fixed

@@ -437,6 +437,12 @@ impl Device {
         self.model.connection
     }
 
+    /// The HID path the device is queried on, which tells identical devices apart for as
+    /// long as they stay in the same port.
+    pub fn id(&self) -> String {
+        self.path.to_string_lossy().into_owned()
+    }
+
     pub fn read_battery(&self, api: &HidApi) -> Result<Reading, HidError> {
         let channel = &self.model.channel;
         let sub = match self.model.protocol {
@@ -495,8 +501,10 @@ pub fn discover(api: &HidApi) -> Vec<Device> {
         }
     }
     // HID enumeration order can change after a replug; callers that show one entry per
-    // device get the same order every time.
-    devices.sort_by_key(|device| (device.name, device.model.connection));
+    // device get the same order every time, identical devices included.
+    devices.sort_by(|a, b| {
+        (a.name, a.model.connection, &a.path).cmp(&(b.name, b.model.connection, &b.path))
+    });
     devices
 }
 

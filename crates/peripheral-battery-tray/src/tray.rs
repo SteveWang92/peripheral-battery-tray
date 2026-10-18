@@ -151,8 +151,7 @@ struct Tray {
     cards: Vec<Card>,
     menu: Option<MenuItems>,
     look: Look,
-    /// Alert state per device id: a ROG device charging over its cable appears under another
-    /// connection than the receiver it drains on.
+    /// Alert state per `DeviceStatus::alert_key`.
     alerts: HashMap<String, Alerts>,
     /// Each device's last battery reading and when it was taken.
     last_read: HashMap<DeviceKey, (u8, DateTime<Local>)>,
@@ -493,11 +492,11 @@ impl Tray {
         let strings = self.strings();
         // A device charging under any connection is charging under all of them; otherwise
         // its receiver entry would raise the low toast the cable entry re-arms, every round.
-        let charging_ids: HashSet<&str> = snapshot
+        let charging_keys: HashSet<&str> = snapshot
             .devices
             .iter()
             .filter(|d| matches!(d.reading, Reading::Battery { charging: true, .. }))
-            .map(|d| d.id.as_str())
+            .map(DeviceStatus::alert_key)
             .collect();
         for device in &snapshot.devices {
             let Reading::Battery {
@@ -506,11 +505,14 @@ impl Tray {
             else {
                 continue;
             };
-            let alerts = self.alerts.entry(device.id.clone()).or_insert(Alerts {
-                low_armed: true,
-                full_pending: false,
-            });
-            if charging_ids.contains(device.id.as_str()) {
+            let alerts = self
+                .alerts
+                .entry(device.alert_key().to_owned())
+                .or_insert(Alerts {
+                    low_armed: true,
+                    full_pending: false,
+                });
+            if charging_keys.contains(device.alert_key()) {
                 alerts.low_armed = true;
             } else if alerts.low_armed
                 && self.settings.low_threshold().is_some_and(|t| percent <= t)

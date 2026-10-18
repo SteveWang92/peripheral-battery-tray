@@ -80,9 +80,8 @@ impl From<logitech_battery::Reading> for Reading {
 pub struct DeviceStatus {
     pub name: String,
     pub connection: Connection,
-    /// Tells devices apart: the model name for ROG, whose receiver and cable entries are one
-    /// device; the receiver path and slot for Logitech, whose identical devices each have
-    /// their own slot.
+    /// Tells identical devices apart: the HID path for ROG, the receiver path and slot for
+    /// Logitech.
     pub id: String,
     /// A failed query counts as not responding; its error goes to the log.
     pub reading: Reading,
@@ -94,6 +93,16 @@ pub type DeviceKey = (String, Connection);
 impl DeviceStatus {
     pub fn key(&self) -> DeviceKey {
         (self.id.clone(), self.connection)
+    }
+
+    /// What alerts are kept per. A ROG device charging over its cable appears as a wired
+    /// entry beside its receiver entry, so ROG alerts go by model; identical ROG devices
+    /// therefore share theirs.
+    pub fn alert_key(&self) -> &str {
+        match self.connection {
+            Connection::Rog(_) => &self.name,
+            Connection::Logitech(_) => &self.id,
+        }
     }
 }
 
@@ -216,7 +225,7 @@ impl Poller {
             let started = Instant::now();
             let result = device.read_battery(&self.api);
             let elapsed = started.elapsed().as_millis();
-            let (name, connection) = (device.name(), device.connection());
+            let (name, id, connection) = (device.name(), device.id(), device.connection());
             let text = match &result {
                 Ok(reading) => reading.to_string(),
                 Err(error) => format!("query failed: {error}"),
@@ -225,7 +234,7 @@ impl Poller {
             rog_failed |= result.is_err();
             let status = DeviceStatus {
                 name: name.to_owned(),
-                id: name.to_owned(),
+                id,
                 connection: Connection::Rog(connection),
                 reading: result.map_or(Reading::Asleep, Reading::from),
             };

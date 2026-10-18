@@ -938,8 +938,7 @@ dependencies = [
 
 [[package]]
 name = "rog-battery"
-version = "0.1.0"
-source = "git+https://github.com/SteveWang92/rog-battery-tray?tag=v0.1.0#5a1904db81d0d2a244f842c421d1368e70118e46"
+version = "0.1.1"
 dependencies = [
  "hidapi",
 ]

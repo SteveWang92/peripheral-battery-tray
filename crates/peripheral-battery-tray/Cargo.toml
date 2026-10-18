@@ -9,7 +9,7 @@ repository.workspace = true
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 logitech-battery = { path = "../logitech-battery" }
-rog-battery = { git = "https://github.com/SteveWang92/rog-battery-tray", tag = "v0.1.0" }
+rog-battery = { path = "../rog-battery" }
 serde = { version = "1.0.229", features = ["derive"] }
 tauri-winrt-notification = "0.8.1"
 toml = "1.1.8"

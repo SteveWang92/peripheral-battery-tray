@@ -12,11 +12,8 @@ starting with ASUS ROG and Logitech. It is a Cargo workspace:
 | Crate | Role |
 | --- | --- |
 | `crates/logitech-battery` | Logitech device discovery and battery queries over HID++. No UI, so other applications can reuse it. |
+| `crates/rog-battery` | ASUS ROG device discovery and battery queries over HID. No UI, so other applications can reuse it. |
 | `crates/peripheral-battery-tray` | The tray application, plus the `--once` command-line mode that prints every detected device's battery and exits. |
-
-ROG devices come from the `rog-battery` library of
-[rog-battery-tray](https://github.com/SteveWang92/rog-battery-tray), a Git dependency
-pinned to one of that repository's release tags.
 
 ## Project exceptions
 
@@ -24,15 +21,6 @@ pinned to one of that repository's release tags.
   GitHub issues. Read it before starting work when it is present; do not open issues for
   planned work.
 - The repository is public. Only the maintainer decides its visibility; never change it.
-
-## Relationship to rog-battery-tray
-
-- New features land here. rog-battery-tray is the published ROG-only program and is not
-  extended in step with this one.
-- `rog-battery` code is never copied here. A change it needs is made in rog-battery-tray,
-  released there under a new tag, and picked up here by bumping the tag.
-- A fix or feature that is low-level or general enough to suit rog-battery-tray as well is
-  proposed to the maintainer, who decides whether it goes there too.
 
 ## Device rules
 

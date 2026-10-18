@@ -113,8 +113,7 @@ same path; settings and "Start with Windows" carry over.
 ## Usage
 
 Run `peripheral-battery-tray.exe`. Only one copy runs at a time. It can run alongside
-Armoury Crate and G HUB; running it together with rog-battery-tray shows ROG devices twice,
-so use one or the other.
+Armoury Crate and G HUB.
 
 From a terminal, `peripheral-battery-tray.exe --once` prints every detected device's
 battery and exits. PowerShell and Command Prompt do not wait for a windowed program, so pipe
@@ -151,8 +150,7 @@ The executable is `target/release/peripheral-battery-tray.exe`.
 ## Credits
 
 The Logitech HID++ protocol details come from [Solaar](https://github.com/pwr-Solaar/Solaar)
-(GPL-2.0), and the ROG device IDs and protocol details, through the `rog-battery` library of
-[rog-battery-tray](https://github.com/SteveWang92/rog-battery-tray), from
+(GPL-2.0), and the ROG device IDs and protocol details from
 [G-Helper](https://github.com/seerge/g-helper) (GPL-3.0). This project is an independent
 implementation and contains none of their code.
 

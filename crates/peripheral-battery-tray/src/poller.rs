@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
-use logitech_battery::HidApi;
+use logitech_battery::{HidApi, HidError};
 
 const ASUS_VID: u16 = 0x0B05;
 
@@ -103,6 +104,85 @@ impl DeviceStatus {
             Connection::Rog(_) => &self.name,
             Connection::Logitech(_) => &self.id,
         }
+    }
+}
+
+/// A discovered device of any brand.
+#[derive(Clone, Copy)]
+pub enum Device<'a> {
+    Rog(&'a rog_battery::Device),
+    Logitech(&'a logitech_battery::Device),
+}
+
+/// Every device of every brand, one brand after another.
+pub fn every_device<'a>(
+    rog: &'a [rog_battery::Device],
+    logitech: &'a [logitech_battery::Device],
+) -> impl Iterator<Item = Device<'a>> {
+    rog.iter()
+        .map(Device::Rog)
+        .chain(logitech.iter().map(Device::Logitech))
+}
+
+/// The outcome of one battery query.
+pub struct Query {
+    pub status: DeviceStatus,
+    /// The device, its connection and its reading or error, as `--once` prints it and the
+    /// log records it.
+    pub line: String,
+    pub failed: bool,
+}
+
+impl Device<'_> {
+    pub fn query(self, api: &HidApi) -> Query {
+        match self {
+            Device::Rog(device) => {
+                let result = device.read_battery(api);
+                let connection = device.connection();
+                describe(
+                    device.name().to_owned(),
+                    device.id(),
+                    connection,
+                    Connection::Rog(connection),
+                    result,
+                )
+            }
+            Device::Logitech(device) => {
+                let result = device.read_battery(api);
+                // Read after the query: a device's first answer replaces its shortened name.
+                let connection = device.connection();
+                describe(
+                    device.name(),
+                    device.id(),
+                    connection,
+                    Connection::Logitech(connection),
+                    result,
+                )
+            }
+        }
+    }
+}
+
+fn describe<R: fmt::Display + Into<Reading>>(
+    name: String,
+    id: String,
+    shown: impl fmt::Display,
+    connection: Connection,
+    result: Result<R, HidError>,
+) -> Query {
+    let text = match &result {
+        Ok(reading) => reading.to_string(),
+        Err(error) => format!("query failed: {error}"),
+    };
+    Query {
+        line: format!("{name} ({shown}): {text}"),
+        failed: result.is_err(),
+        status: DeviceStatus {
+            name,
+            id,
+            connection,
+            reading: result.map_or(Reading::Asleep, Into::into),
+        },
     }
 }
 
@@ -218,55 +298,23 @@ impl Poller {
             self.log_line("no supported device found");
         }
 
-        let mut devices = Vec::with_capacity(self.rog.len() + self.logitech.len());
-        let mut rog_failed = false;
-        for i in 0..self.rog.len() {
-            let device = &self.rog[i];
+        let mut queries = Vec::with_capacity(self.rog.len() + self.logitech.len());
+        for device in every_device(&self.rog, &self.logitech) {
             let started = Instant::now();
-            let result = device.read_battery(&self.api);
-            let elapsed = started.elapsed().as_millis();
-            let (name, id, connection) = (device.name(), device.id(), device.connection());
-            let text = match &result {
-                Ok(reading) => reading.to_string(),
-                Err(error) => format!("query failed: {error}"),
-            };
-            self.log_line(&format!("{name} ({connection}): {text}  [{elapsed} ms]"));
-            rog_failed |= result.is_err();
-            let status = DeviceStatus {
-                name: name.to_owned(),
-                id,
-                connection: Connection::Rog(connection),
-                reading: result.map_or(Reading::Asleep, Reading::from),
-            };
-            devices.push(self.steady(status));
+            let query = device.query(&self.api);
+            queries.push((query, started.elapsed()));
         }
-        let mut logitech_failed = false;
-        for i in 0..self.logitech.len() {
-            let device = &self.logitech[i];
-            let started = Instant::now();
-            let result = device.read_battery(&self.api);
-            let elapsed = started.elapsed().as_millis();
-            // Read after the query: a device's first answer replaces its shortened name.
-            let (name, id, connection) = (device.name(), device.id(), device.connection());
-            let text = match &result {
-                Ok(reading) => reading.to_string(),
-                Err(error) => format!("query failed: {error}"),
-            };
-            self.log_line(&format!("{name} ({connection}): {text}  [{elapsed} ms]"));
-            logitech_failed |= result.is_err();
-            let status = DeviceStatus {
-                name,
-                id,
-                connection: Connection::Logitech(connection),
-                reading: result.map_or(Reading::Asleep, Reading::from),
-            };
-            devices.push(self.steady(status));
-        }
-        if rog_failed {
-            self.rog.clear();
-        }
-        if logitech_failed {
-            self.logitech.clear();
+        let mut devices = Vec::with_capacity(queries.len());
+        for (query, elapsed) in queries {
+            self.log_line(&format!("{}  [{} ms]", query.line, elapsed.as_millis()));
+            // The brand's devices are discovered again next round.
+            if query.failed {
+                match query.status.connection {
+                    Connection::Rog(_) => self.rog.clear(),
+                    Connection::Logitech(_) => self.logitech.clear(),
+                }
+            }
+            devices.push(self.steady(query.status));
         }
         Snapshot {
             devices,

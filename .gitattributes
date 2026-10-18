@@ -1,0 +1,9 @@
+# Normalize all text files to LF in the repository and in the working tree, regardless of
+# the committer's platform or local git config.
+* text=auto eol=lf
+# Windows-only scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.ico binary
+*.png binary

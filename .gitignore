@@ -1,5 +1,44 @@
+# -----------------------------------------------------------------------------
+# Allowlist-style ignore: everything at the repository root is ignored by default and
+# only reviewed paths are un-ignored below. A new top-level file or directory stays
+# invisible to git until it is deliberately added here, so a stray credential or private
+# config cannot be committed by accident.
+# -----------------------------------------------------------------------------
 /*
-!/.gitignore
 
+# --- Tracked directories ---
+!/.github/
+!/.vscode/
+!/crates/
+
+# --- Tracked root files ---
+!/.editorconfig
+!/.gitattributes
+!/.gitignore
+!/Cargo.lock
+!/Cargo.toml
+!/changedeck.json
+!/CHANGELOG.md
+!/CLAUDE.md
+!/LICENSE
+!/README.md
+!/rustfmt.toml
+
+# --- Never track, anywhere in the tree ---
+# Local-only files must use the .local marker.
 *.local
 *.local.*
+
+# Build output
+target/
+
+# Editors and operating systems
+.idea/
+# Two files under .vscode/ are shared on purpose: they point every contributor's editor at
+# rustfmt. Everything else there is personal.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+Desktop.ini

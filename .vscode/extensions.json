@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    // Applies .editorconfig to the files rustfmt does not reach.
+    "editorconfig.editorconfig"
+  ],
+  // Prettier would reflow the hand-wrapped documentation.
+  "unwantedRecommendations": ["esbenp.prettier-vscode"]
+}

@@ -1,0 +1,10 @@
+[package]
+name = "logitech-battery"
+version = "0.1.0"
+description = "Battery queries for Logitech wireless peripherals over HID++"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hidapi = "2.6.7"

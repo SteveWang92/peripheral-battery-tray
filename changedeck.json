@@ -1,0 +1,11 @@
+{
+  "appName": "peripheral-battery-tray",
+  "repo": "SteveWang92/peripheral-battery-tray",
+  "versionFiles": [
+    { "path": "crates/peripheral-battery-tray/Cargo.toml", "type": "cargo-toml" },
+    { "path": "crates/logitech-battery/Cargo.toml", "type": "cargo-toml" },
+    { "path": "Cargo.lock", "type": "cargo-lock", "package": "peripheral-battery-tray" },
+    { "path": "Cargo.lock", "type": "cargo-lock", "package": "logitech-battery" }
+  ],
+  "afterShip": "Publishing the release starts .github/workflows/release.yml, which builds peripheral-battery-tray.exe from the tag and attaches it. Confirm that run finished and the executable is on the release before calling the release done: gh run list --repo SteveWang92/peripheral-battery-tray --workflow release.yml --limit 1"
+}

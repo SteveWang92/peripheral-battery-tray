@@ -14,8 +14,9 @@ trademarks of Logitech.
   slash through it.
 - Clicking an icon shows a card with each device's battery as a percentage and a bar, its
   connection, whether it is charging and when it was last read, and a refresh button; a
-  click anywhere else closes it. Once a device has drained 5 points since its last charge,
-  the card also estimates its time left on battery from how fast it has drained.
+  click anywhere else closes it. Once a device that reports an exact percentage has drained
+  5 points since its last charge, the card also estimates its time left on battery from how
+  fast it has drained.
 - Every setting is in the right-click menu: refresh now, the low-battery threshold, the
   refresh interval, one icon per device or one merged icon showing the lowest level, a
   full-charge alert, starting with Windows, the language (English or Simplified Chinese)

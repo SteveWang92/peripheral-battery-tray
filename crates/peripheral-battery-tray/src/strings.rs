@@ -109,7 +109,6 @@ impl Strings {
         }
     }
 
-    /// The card's status line under a device's battery bar.
     /// The card's status line for a device read at `time`; one on battery shows its estimated
     /// time left when there is one.
     pub fn live_status(&self, charging: bool, remaining: Option<Duration>, time: &str) -> String {
@@ -122,11 +121,20 @@ impl Strings {
     }
 
     fn time_left(&self, remaining: Duration) -> String {
-        let hours = remaining.as_secs() / 3600;
-        match hours {
-            0..2 => self.under_two_hours.to_owned(),
-            2..48 => fill(self.hours_left, &[&hours.to_string()]),
-            _ => fill(self.days_left, &[&((hours + 12) / 24).to_string()]),
+        const HOUR: u64 = 3600;
+        let seconds = remaining.as_secs();
+        if seconds < 2 * HOUR {
+            self.under_two_hours.to_owned()
+        } else if seconds < 47 * HOUR + HOUR / 2 {
+            fill(
+                self.hours_left,
+                &[&((seconds + HOUR / 2) / HOUR).to_string()],
+            )
+        } else {
+            fill(
+                self.days_left,
+                &[&((seconds + 12 * HOUR) / (24 * HOUR)).to_string()],
+            )
         }
     }
 

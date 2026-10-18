@@ -323,8 +323,12 @@ impl Poller {
                 }
             }
             let mut status = self.steady(query.status);
+            // A percentage derived from a voltage or a coarse level moves too unevenly to
+            // time.
             if let Reading::Battery {
-                percent, charging, ..
+                percent,
+                charging,
+                estimated: false,
             } = status.reading
             {
                 let device = format!("{:?} {}", status.connection, status.id);

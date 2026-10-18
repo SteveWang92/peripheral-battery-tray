@@ -437,10 +437,11 @@ impl Device {
         self.model.connection
     }
 
-    /// The HID path the device is queried on, which tells identical devices apart for as
-    /// long as they stay in the same port.
+    /// The HID path the device is queried on and its model, which tell devices apart for as
+    /// long as they stay in the same port: every device behind one OMNI receiver shares the
+    /// receiver's path.
     pub fn id(&self) -> String {
-        self.path.to_string_lossy().into_owned()
+        format!("{}#{}", self.path.to_string_lossy(), self.name)
     }
 
     pub fn read_battery(&self, api: &HidApi) -> Result<Reading, HidError> {

@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,7 +13,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
-use logitech_battery::HidApi;
+use logitech_battery::{HidApi, HidError};
+
+use crate::discharge::History;
 
 const ASUS_VID: u16 = 0x0B05;
 
@@ -80,12 +83,13 @@ impl From<logitech_battery::Reading> for Reading {
 pub struct DeviceStatus {
     pub name: String,
     pub connection: Connection,
-    /// Tells devices apart: the model name for ROG, whose receiver and cable entries are one
-    /// device; the receiver path and slot for Logitech, whose identical devices each have
-    /// their own slot.
+    /// Tells identical devices apart: the HID path for ROG, the receiver path and slot for
+    /// Logitech.
     pub id: String,
     /// A failed query counts as not responding; its error goes to the log.
     pub reading: Reading,
+    /// The estimated time left on battery, once the drain since the last charge allows one.
+    pub remaining: Option<Duration>,
 }
 
 /// Identifies one device across snapshots.
@@ -94,6 +98,96 @@ pub type DeviceKey = (String, Connection);
 impl DeviceStatus {
     pub fn key(&self) -> DeviceKey {
         (self.id.clone(), self.connection)
+    }
+
+    /// What alerts are kept per. A ROG device charging over its cable appears as a wired
+    /// entry beside its receiver entry, so ROG alerts go by model; identical ROG devices
+    /// therefore share theirs.
+    pub fn alert_key(&self) -> &str {
+        match self.connection {
+            Connection::Rog(_) => &self.name,
+            Connection::Logitech(_) => &self.id,
+        }
+    }
+}
+
+/// A discovered device of any brand.
+#[derive(Clone, Copy)]
+pub enum Device<'a> {
+    Rog(&'a rog_battery::Device),
+    Logitech(&'a logitech_battery::Device),
+}
+
+/// Every device of every brand, one brand after another.
+pub fn every_device<'a>(
+    rog: &'a [rog_battery::Device],
+    logitech: &'a [logitech_battery::Device],
+) -> impl Iterator<Item = Device<'a>> {
+    rog.iter()
+        .map(Device::Rog)
+        .chain(logitech.iter().map(Device::Logitech))
+}
+
+/// The outcome of one battery query.
+pub struct Query {
+    pub status: DeviceStatus,
+    /// The device, its connection and its reading or error, as `--once` prints it and the
+    /// log records it.
+    pub line: String,
+    pub failed: bool,
+}
+
+impl Device<'_> {
+    pub fn query(self, api: &HidApi) -> Query {
+        match self {
+            Device::Rog(device) => {
+                let result = device.read_battery(api);
+                let connection = device.connection();
+                describe(
+                    device.name().to_owned(),
+                    device.id(),
+                    connection,
+                    Connection::Rog(connection),
+                    result,
+                )
+            }
+            Device::Logitech(device) => {
+                let result = device.read_battery(api);
+                // Read after the query: a device's first answer replaces its shortened name.
+                let connection = device.connection();
+                describe(
+                    device.name(),
+                    device.id(),
+                    connection,
+                    Connection::Logitech(connection),
+                    result,
+                )
+            }
+        }
+    }
+}
+
+fn describe<R: fmt::Display + Into<Reading>>(
+    name: String,
+    id: String,
+    shown: impl fmt::Display,
+    connection: Connection,
+    result: Result<R, HidError>,
+) -> Query {
+    let text = match &result {
+        Ok(reading) => reading.to_string(),
+        Err(error) => format!("query failed: {error}"),
+    };
+    Query {
+        line: format!("{name} ({shown}): {text}"),
+        failed: result.is_err(),
+        status: DeviceStatus {
+            name,
+            id,
+            connection,
+            reading: result.map_or(Reading::Asleep, Into::into),
+            remaining: None,
+        },
     }
 }
 
@@ -127,6 +221,7 @@ pub fn spawn(
             logitech_pairings: Vec::new(),
             shown: HashMap::new(),
             doubted: HashSet::new(),
+            history: History::load(),
             log: None,
         }
         .run(interval, logging, inbox, snapshots, notify)
@@ -146,6 +241,7 @@ struct Poller {
     shown: HashMap<DeviceKey, u8>,
     /// Devices whose last reading was a sudden drop that was held back.
     doubted: HashSet<DeviceKey>,
+    history: History,
     log: Option<File>,
 }
 
@@ -209,60 +305,41 @@ impl Poller {
             self.log_line("no supported device found");
         }
 
-        let mut devices = Vec::with_capacity(self.rog.len() + self.logitech.len());
-        let mut rog_failed = false;
-        for i in 0..self.rog.len() {
-            let device = &self.rog[i];
+        let mut queries = Vec::with_capacity(self.rog.len() + self.logitech.len());
+        for device in every_device(&self.rog, &self.logitech) {
             let started = Instant::now();
-            let result = device.read_battery(&self.api);
-            let elapsed = started.elapsed().as_millis();
-            let (name, connection) = (device.name(), device.connection());
-            let text = match &result {
-                Ok(reading) => reading.to_string(),
-                Err(error) => format!("query failed: {error}"),
-            };
-            self.log_line(&format!("{name} ({connection}): {text}  [{elapsed} ms]"));
-            rog_failed |= result.is_err();
-            let status = DeviceStatus {
-                name: name.to_owned(),
-                id: name.to_owned(),
-                connection: Connection::Rog(connection),
-                reading: result.map_or(Reading::Asleep, Reading::from),
-            };
-            devices.push(self.steady(status));
+            let query = device.query(&self.api);
+            queries.push((query, started.elapsed()));
         }
-        let mut logitech_failed = false;
-        for i in 0..self.logitech.len() {
-            let device = &self.logitech[i];
-            let started = Instant::now();
-            let result = device.read_battery(&self.api);
-            let elapsed = started.elapsed().as_millis();
-            // Read after the query: a device's first answer replaces its shortened name.
-            let (name, id, connection) = (device.name(), device.id(), device.connection());
-            let text = match &result {
-                Ok(reading) => reading.to_string(),
-                Err(error) => format!("query failed: {error}"),
-            };
-            self.log_line(&format!("{name} ({connection}): {text}  [{elapsed} ms]"));
-            logitech_failed |= result.is_err();
-            let status = DeviceStatus {
-                name,
-                id,
-                connection: Connection::Logitech(connection),
-                reading: result.map_or(Reading::Asleep, Reading::from),
-            };
-            devices.push(self.steady(status));
+        let at = Local::now();
+        let mut devices = Vec::with_capacity(queries.len());
+        for (query, elapsed) in queries {
+            self.log_line(&format!("{}  [{} ms]", query.line, elapsed.as_millis()));
+            // The brand's devices are discovered again next round.
+            if query.failed {
+                match query.status.connection {
+                    Connection::Rog(_) => self.rog.clear(),
+                    Connection::Logitech(_) => self.logitech.clear(),
+                }
+            }
+            let mut status = self.steady(query.status);
+            // A percentage derived from a voltage or a coarse level moves too unevenly to
+            // time.
+            if let Reading::Battery {
+                percent,
+                charging,
+                estimated: false,
+            } = status.reading
+            {
+                let device = format!("{:?} {}", status.connection, status.id);
+                status.remaining = self
+                    .history
+                    .record(&device, percent, charging, at.timestamp());
+            }
+            devices.push(status);
         }
-        if rog_failed {
-            self.rog.clear();
-        }
-        if logitech_failed {
-            self.logitech.clear();
-        }
-        Snapshot {
-            devices,
-            at: Local::now(),
-        }
+        self.history.save();
+        Snapshot { devices, at }
     }
 
     /// Holds back a sudden drop until a second reading in a row shows it, passing on the

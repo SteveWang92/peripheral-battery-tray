@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["crates/logitech-battery", "crates/peripheral-battery-tray"]
+members = [
+    "crates/logitech-battery",
+    "crates/peripheral-battery-tray",
+    "crates/rog-battery",
+]
 
 [workspace.package]
 edition = "2024"

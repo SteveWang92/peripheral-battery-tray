@@ -12,27 +12,15 @@ starting with ASUS ROG and Logitech. It is a Cargo workspace:
 | Crate | Role |
 | --- | --- |
 | `crates/logitech-battery` | Logitech device discovery and battery queries over HID++. No UI, so other applications can reuse it. |
+| `crates/rog-battery` | ASUS ROG device discovery and battery queries over HID. No UI, so other applications can reuse it. |
 | `crates/peripheral-battery-tray` | The tray application, plus the `--once` command-line mode that prints every detected device's battery and exits. |
-
-ROG devices come from the `rog-battery` library of
-[rog-battery-tray](https://github.com/SteveWang92/rog-battery-tray), a Git dependency
-pinned to one of that repository's release tags.
 
 ## Project exceptions
 
-- Planned work and progress live in the maintainer's untracked `PLAN.local.md`, not in
-  GitHub issues. Read it before starting work when it is present; do not open issues for
-  planned work.
+- Larger planned work is a GitHub issue. Smaller items that wait on hardware, observation
+  or an upstream release live in the maintainer's untracked `BACKLOG.local.md`. Read both
+  before starting work when they are present.
 - The repository is public. Only the maintainer decides its visibility; never change it.
-
-## Relationship to rog-battery-tray
-
-- New features land here. rog-battery-tray is the published ROG-only program and is not
-  extended in step with this one.
-- `rog-battery` code is never copied here. A change it needs is made in rog-battery-tray,
-  released there under a new tag, and picked up here by bumping the tag.
-- A fix or feature that is low-level or general enough to suit rog-battery-tray as well is
-  proposed to the maintainer, who decides whether it goes there too.
 
 ## Device rules
 
@@ -97,6 +85,9 @@ pinned to one of that repository's release tags.
   The `--once` output and its errors are English only.
 - The battery log is diagnostic: off by default, switched from the menu, written to
   `%LOCALAPPDATA%\peripheral-battery-tray\battery.log`.
+- The card's time-left estimate comes from each device's drain since its last charge, which
+  the poller keeps in `%LOCALAPPDATA%\peripheral-battery-tray\history.toml` so it survives
+  restarts (`discharge.rs`).
 
 ## Development
 
@@ -129,5 +120,6 @@ Run before committing; CI runs the same on pull requests:
 ```sh
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
 cargo build --locked --workspace --release
 ```

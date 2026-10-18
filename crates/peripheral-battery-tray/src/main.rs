@@ -3,6 +3,7 @@
 
 mod app_icon;
 mod config;
+mod discharge;
 mod icon;
 mod poller;
 mod popup;
@@ -90,29 +91,11 @@ fn print_once() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut lines = Vec::new();
-    for device in rog_battery::discover(&api) {
-        let status = match device.read_battery(&api) {
-            Ok(reading) => reading.to_string(),
-            Err(error) => format!("query failed: {error}"),
-        };
-        lines.push(format!(
-            "{} ({}): {status}",
-            device.name(),
-            device.connection()
-        ));
-    }
-    for device in logitech_battery::discover(&api) {
-        let status = match device.read_battery(&api) {
-            Ok(reading) => reading.to_string(),
-            Err(error) => format!("query failed: {error}"),
-        };
-        lines.push(format!(
-            "{} ({}): {status}",
-            device.name(),
-            device.connection()
-        ));
-    }
+    let rog = rog_battery::discover(&api);
+    let logitech = logitech_battery::discover(&api);
+    let lines: Vec<String> = poller::every_device(&rog, &logitech)
+        .map(|device| device.query(&api).line)
+        .collect();
     if lines.is_empty() {
         println!("No supported device found.");
         return ExitCode::FAILURE;

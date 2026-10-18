@@ -14,7 +14,9 @@ trademarks of Logitech.
   slash through it.
 - Clicking an icon shows a card with each device's battery as a percentage and a bar, its
   connection, whether it is charging and when it was last read, and a refresh button; a
-  click anywhere else closes it.
+  click anywhere else closes it. Once a device that reports an exact percentage has drained
+  5 points since its last charge, the card also estimates its time left on battery from how
+  fast it has drained.
 - Every setting is in the right-click menu: refresh now, the low-battery threshold, the
   refresh interval, one icon per device or one merged icon showing the lowest level, a
   full-charge alert, starting with Windows, the language (English or Simplified Chinese)
@@ -113,15 +115,16 @@ same path; settings and "Start with Windows" carry over.
 ## Usage
 
 Run `peripheral-battery-tray.exe`. Only one copy runs at a time. It can run alongside
-Armoury Crate and G HUB; running it together with rog-battery-tray shows ROG devices twice,
-so use one or the other.
+Armoury Crate and G HUB.
 
 From a terminal, `peripheral-battery-tray.exe --once` prints every detected device's
 battery and exits. PowerShell and Command Prompt do not wait for a windowed program, so pipe
 it there to see the output: `peripheral-battery-tray.exe --once | more`.
 
 Settings are saved to `%APPDATA%\peripheral-battery-tray\config.toml`. The battery log, when
-switched on from the menu, is written to `%LOCALAPPDATA%\peripheral-battery-tray\battery.log`.
+switched on from the menu, is written to `%LOCALAPPDATA%\peripheral-battery-tray\battery.log`,
+and each device's drain since its last charge, behind the time-left estimate, is kept in
+`history.toml` in the same folder.
 
 On first run the program adds itself to the current user's startup programs
 (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`); switching off "Start with Windows"
@@ -151,8 +154,7 @@ The executable is `target/release/peripheral-battery-tray.exe`.
 ## Credits
 
 The Logitech HID++ protocol details come from [Solaar](https://github.com/pwr-Solaar/Solaar)
-(GPL-2.0), and the ROG device IDs and protocol details, through the `rog-battery` library of
-[rog-battery-tray](https://github.com/SteveWang92/rog-battery-tray), from
+(GPL-2.0), and the ROG device IDs and protocol details from
 [G-Helper](https://github.com/seerge/g-helper) (GPL-3.0). This project is an independent
 implementation and contains none of their code.
 

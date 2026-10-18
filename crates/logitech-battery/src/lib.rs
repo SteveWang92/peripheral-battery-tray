@@ -319,11 +319,12 @@ pub fn discover(api: &HidApi) -> Vec<Device> {
                 continue;
             };
             // A device that answers without a battery feature, or only speaks HID++ 1.0,
-            // has nothing to show; one that is unreachable is listed until it answers.
+            // has nothing to show; any other device is listed, and one whose probe did not
+            // get through is looked up again when it is first read.
             let battery = match battery_feature(&channel, index) {
+                Ok(Answer::Reply(None) | Answer::Failed(ERR_INVALID_SUB_ID)) => continue,
                 Ok(Answer::Reply(Some(battery))) => Some(battery),
-                Ok(Answer::Unreachable) => None,
-                _ => continue,
+                _ => None,
             };
             let name = match battery {
                 Some(_) => device_name(&channel, index).ok().flatten(),

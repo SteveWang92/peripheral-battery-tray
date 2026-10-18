@@ -7,6 +7,8 @@ on `main`, with the matching section below as its notes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-18
+
 ### Added
 
 - The card estimates each device's time left on battery from its recent drain.
@@ -43,6 +45,7 @@ on `main`, with the matching section below as its notes.
 - Starts with Windows by default, switchable from the menu.
 - English and Simplified Chinese, following the system language by default.
 
-[Unreleased]: https://github.com/SteveWang92/peripheral-battery-tray/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/SteveWang92/peripheral-battery-tray/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/SteveWang92/peripheral-battery-tray/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/SteveWang92/peripheral-battery-tray/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SteveWang92/peripheral-battery-tray/releases/tag/v0.1.0

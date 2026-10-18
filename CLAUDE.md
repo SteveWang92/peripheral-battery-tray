@@ -57,6 +57,48 @@ pinned to one of that repository's release tags.
 - Documents and comments describe the current state only; history belongs in commits and
   `CHANGELOG.md`.
 
+## Tray rules
+
+- Battery is shown only through the tray icon, the card a left click on it shows, the
+  native right-click menu and Windows toasts. There is no main window or settings window,
+  and no native tooltip: the shell shows it only after a hover delay no program can
+  shorten, and cuts it at 128 characters.
+- The card (`popup.rs`) is a GDI-drawn popup that closes when it loses activation. Its
+  window procedure runs inside Win32 calls the tray makes while holding its own state, so
+  the card keeps its state apart from the tray's.
+- Icons are drawn in code, never stored as image files: tray icons at runtime for the
+  taskbar's DPI and theme (`icon.rs`), the application icon from `app_icon.rs`, which
+  `build.rs` embeds in the executable with its version information and the tray writes out
+  for toasts.
+- Native menus close after a click. A `WH_MSGFILTER` hook in `tray.rs` forwards a click on
+  a command item as its `WM_COMMAND` and swallows it, so the menu stays open; menu items
+  are therefore updated in place while it shows, and anything that replaces the menu or
+  an icon waits until it closes. A language change rebuilds the menu after it closes and
+  reopens it from the same icon.
+- The shell knows a tray icon by the executable's path and the icon's number, and keeps
+  its "always show" setting under them. Icons are numbered in creation order, so as long
+  as none is recreated, every run numbers them the same. Never recreate an icon to change
+  it: give the existing one a new image, tooltip or menu, or it appears as a new program in
+  the taskbar settings. Icons carry no GUID: the shell binds a GUID to one executable
+  path and refuses it while a stale registration holds it.
+- A menu shown again by the tray itself goes through `TrackPopupMenu` directly, never
+  `TrayIcon::show_menu`, which holds the icon borrowed for as long as the menu is open;
+  the menu hook updating that icon would then panic and end the process.
+- A panic is written to `%LOCALAPPDATA%\peripheral-battery-tray\crash.log`; the tray has no
+  console to show it.
+- HID queries run on the poller thread, never on the thread that owns the tray.
+- Settings live in `%APPDATA%\peripheral-battery-tray\config.toml`. The file may be edited by
+  hand, so it is validated on load; an invalid file means defaults plus one toast, and the
+  file is left alone until a setting changes.
+- Autostart is the per-user `Run` registry value, the single source of truth for that
+  setting; it is not duplicated in the config file. A value pointing at another copy's
+  path counts as off.
+- Every string the tray shows lives in `strings.rs`, in English and Simplified Chinese,
+  except the language names, each written in its own language, and the program's name.
+  The `--once` output and its errors are English only.
+- The battery log is diagnostic: off by default, switched from the menu, written to
+  `%LOCALAPPDATA%\peripheral-battery-tray\battery.log`.
+
 ## Development
 
 - `dev` is the default branch and receives all work; `main` receives only releases.

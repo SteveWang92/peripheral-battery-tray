@@ -32,7 +32,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::config::{self, Loaded, Settings};
 use crate::icon::{self, Face};
 use crate::poller::{self, Command, Connection, DeviceStatus, Reading, Snapshot};
-use crate::popup::{self, Anchor, Card};
+use crate::popup::{self, Anchor, Card, Panel, Tone};
 use crate::strings::{Language, Strings};
 use crate::system;
 use crate::theme::{self, Look};
@@ -126,7 +126,8 @@ struct MenuItems {
     menu: Menu,
     /// The device count it was built for; 0 is the no-device menu.
     devices: usize,
-    rows: Vec<MenuItem>,
+    /// Each device's name row and, greyed below it, its connection and battery.
+    rows: Vec<(MenuItem, MenuItem)>,
     low: Vec<(u8, CheckMenuItem)>,
     intervals: Vec<(u64, CheckMenuItem)>,
     icons_each: CheckMenuItem,
@@ -204,6 +205,10 @@ pub fn run(api: HidApi) {
             PostThreadMessageW(main_thread, WM_APP, 0, 0);
         },
     );
+    let refresh = commands.clone();
+    popup::on_refresh(move || {
+        let _ = refresh.send(Command::Refresh);
+    });
     TRAY.set(Some(Tray {
         settings,
         commands,
@@ -533,10 +538,12 @@ impl Tray {
         let time = snapshot.at.format("%H:%M").to_string();
 
         // Each icon: what it shows and its card.
+        let low = self.settings.low_threshold();
         let faces: Vec<(Face, Card)> = if snapshot.devices.is_empty() {
             let card = Card {
-                sections: vec![(strings.no_device.to_owned(), String::new())],
-                footer: String::new(),
+                title: strings.card_title.to_owned(),
+                panels: Vec::new(),
+                empty: strings.no_device.to_owned(),
             };
             vec![(Face::NoDevice, card)]
         } else if self.settings.merged_icon {
@@ -552,14 +559,14 @@ impl Tray {
                 })
                 .min_by_key(|(percent, _)| *percent);
             let face = lowest.map_or(Face::Asleep, |(_, view)| self.face(view));
-            vec![(face, card(strings, &all, &time))]
+            vec![(face, card(strings, &all, &time, low))]
         } else {
             snapshot
                 .devices
                 .iter()
                 .map(|d| {
                     let view = self.view(d);
-                    (self.face(view), card(strings, &[(d, view)], &time))
+                    (self.face(view), card(strings, &[(d, view)], &time, low))
                 })
                 .collect()
         };
@@ -638,8 +645,9 @@ impl Tray {
         }
         let t = self.strings();
         let s = &self.settings;
-        for (row, device) in items.rows.iter().zip(&snapshot.devices) {
-            row.set_text(row_text(t, device, self.view(device)));
+        for ((name, detail), device) in items.rows.iter().zip(&snapshot.devices) {
+            name.set_text(&device.name);
+            detail.set_text(row_detail(t, device, self.view(device)));
         }
         for (p, item) in &items.low {
             item.set_checked(s.low_threshold == *p);
@@ -733,7 +741,12 @@ impl Tray {
             menu: menu.clone(),
             devices,
             rows: (0..devices)
-                .map(|i| MenuItem::with_id(format!("device:{i}"), "", true, None))
+                .map(|i| {
+                    (
+                        MenuItem::with_id(format!("device:{i}"), "", true, None),
+                        MenuItem::new("", false, None),
+                    )
+                })
                 .collect(),
             low,
             intervals,
@@ -758,8 +771,8 @@ impl Tray {
             );
             return items;
         }
-        for row in &items.rows {
-            append(&menu, &[row]);
+        for (name, detail) in &items.rows {
+            append(&menu, &[name, detail]);
         }
         let version = env!("CARGO_PKG_VERSION");
         append(
@@ -793,40 +806,57 @@ fn submenu<'a>(text: &str, items: impl IntoIterator<Item = &'a CheckMenuItem>) -
     Submenu::with_items(text, true, &items).expect("menu items are new")
 }
 
-fn device_label(strings: &Strings, device: &DeviceStatus) -> String {
-    format!(
-        "{} ({})",
-        device.name,
-        strings.connection(device.connection)
-    )
-}
-
-fn row_text(strings: &Strings, device: &DeviceStatus, view: View) -> String {
-    let right = match view {
+/// The greyed row under a device's name in the menu.
+fn row_detail(strings: &Strings, device: &DeviceStatus, view: View) -> String {
+    let battery = match view {
         View::Live { percent, charging } => strings.row_status(percent, charging),
         View::Asleep { percent, .. } => strings.row_asleep(percent),
         View::Unknown => strings.no_response.to_owned(),
     };
-    format!("{}\t{right}", device_label(strings, device))
+    format!("{} · {battery}", strings.connection(device.connection))
 }
 
-fn card(strings: &Strings, devices: &[(&DeviceStatus, View)], time: &str) -> Card {
-    let sections = devices
+fn card(
+    strings: &Strings,
+    devices: &[(&DeviceStatus, View)],
+    time: &str,
+    low_threshold: Option<u8>,
+) -> Card {
+    let low = |percent| low_threshold.is_some_and(|t| percent <= t);
+    let panels = devices
         .iter()
         .map(|&(d, view)| {
-            let status = match view {
-                View::Live { percent, charging } => strings.battery_line(percent, charging),
-                View::Asleep { percent, read_at } => {
-                    strings.asleep_line(percent, &read_at.format("%H:%M").to_string())
+            let (percent, tone, status) = match view {
+                View::Live { percent, charging } => {
+                    let tone = if charging {
+                        Tone::Charging
+                    } else if low(percent) {
+                        Tone::Low
+                    } else {
+                        Tone::Normal
+                    };
+                    (Some(percent), tone, strings.live_status(charging, time))
                 }
-                View::Unknown => strings.asleep.to_owned(),
+                View::Asleep { percent, read_at } => (
+                    Some(percent),
+                    Tone::Stale,
+                    strings.asleep_status(&read_at.format("%H:%M").to_string()),
+                ),
+                View::Unknown => (None, Tone::Stale, strings.asleep.to_owned()),
             };
-            (device_label(strings, d), status)
+            Panel {
+                name: d.name.clone(),
+                connection: strings.connection_detail(d.connection),
+                percent,
+                tone,
+                status,
+            }
         })
         .collect();
     Card {
-        sections,
-        footer: strings.updated_at(time),
+        title: strings.card_title.to_owned(),
+        panels,
+        empty: String::new(),
     }
 }
 

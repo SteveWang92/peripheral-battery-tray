@@ -2,6 +2,7 @@
 //! the tray. Each round's results go to the tray as a [`Snapshot`] and, when logging is on,
 //! to the log file.
 
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -14,6 +15,11 @@ use logitech_battery::HidApi;
 
 const ASUS_VID: u16 = 0x0B05;
 const LOGITECH_VID: u16 = 0x046D;
+
+/// A drop larger than this between two readings, while not charging, is held back until the
+/// next reading confirms it: a G502 X reported 50% for one reading after being unplugged
+/// at 94%.
+const SUDDEN_DROP: u8 = 20;
 
 pub enum Command {
     Refresh,
@@ -96,6 +102,8 @@ pub fn spawn(
             rog_paths: Vec::new(),
             logitech: Vec::new(),
             logitech_paths: Vec::new(),
+            shown: HashMap::new(),
+            doubted: HashSet::new(),
             log: None,
         }
         .run(interval, logging, inbox, snapshots, notify)
@@ -111,6 +119,10 @@ struct Poller {
     logitech: Vec<logitech_battery::Device>,
     /// The Logitech HID paths present at the last Logitech discovery.
     logitech_paths: Vec<String>,
+    /// Each device's last battery percentage passed on to the tray.
+    shown: HashMap<(String, Connection), u8>,
+    /// Devices whose last reading was a sudden drop that was held back.
+    doubted: HashSet<(String, Connection)>,
     log: Option<File>,
 }
 
@@ -177,11 +189,12 @@ impl Poller {
             };
             self.log_line(&format!("{name} ({connection}): {text}  [{elapsed} ms]"));
             rog_failed |= result.is_err();
-            devices.push(DeviceStatus {
+            let status = DeviceStatus {
                 name: name.to_owned(),
                 connection: Connection::Rog(connection),
                 reading: result.map_or(Reading::Asleep, Reading::from),
-            });
+            };
+            devices.push(self.steady(status));
         }
         let mut logitech_failed = false;
         for i in 0..self.logitech.len() {
@@ -197,11 +210,12 @@ impl Poller {
             };
             self.log_line(&format!("{name} ({connection}): {text}  [{elapsed} ms]"));
             logitech_failed |= result.is_err();
-            devices.push(DeviceStatus {
+            let status = DeviceStatus {
                 name,
                 connection: Connection::Logitech(connection),
                 reading: result.map_or(Reading::Asleep, Reading::from),
-            });
+            };
+            devices.push(self.steady(status));
         }
         if rog_failed {
             self.rog.clear();
@@ -213,6 +227,33 @@ impl Poller {
             devices,
             at: Local::now(),
         }
+    }
+
+    /// Holds back a sudden drop until a second reading in a row shows it, passing on the
+    /// last percentage meanwhile.
+    fn steady(&mut self, mut status: DeviceStatus) -> DeviceStatus {
+        let Reading::Battery { percent, charging } = status.reading else {
+            return status;
+        };
+        let key = (status.name.clone(), status.connection);
+        let held = self.shown.get(&key).copied().filter(|&shown| {
+            !charging && shown.saturating_sub(percent) > SUDDEN_DROP && !self.doubted.contains(&key)
+        });
+        if let Some(shown) = held {
+            self.log_line(&format!(
+                "{}: {percent}% held back, kept {shown}%",
+                status.name
+            ));
+            self.doubted.insert(key);
+            status.reading = Reading::Battery {
+                percent: shown,
+                charging,
+            };
+        } else {
+            self.doubted.remove(&key);
+            self.shown.insert(key, percent);
+        }
+        status
     }
 
     /// The sorted HID paths of one vendor's interfaces.

@@ -13,8 +13,11 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::HiDpi::GetSystemMetricsForDpi;
 use windows_sys::Win32::UI::WindowsAndMessaging::SM_CXSMICON;
 
-const LOW_FILL: [u8; 3] = [0xC2, 0x41, 0x0C];
-const CHARGING_FILL: [u8; 3] = [0x15, 0x80, 0x3D];
+/// Digit colours for a low or charging battery, darker on a light taskbar.
+const LOW_ON_DARK: [u8; 3] = [0xF9, 0x73, 0x16];
+const LOW_ON_LIGHT: [u8; 3] = [0xC2, 0x41, 0x0C];
+const CHARGING_ON_DARK: [u8; 3] = [0x22, 0xC5, 0x5E];
+const CHARGING_ON_LIGHT: [u8; 3] = [0x15, 0x80, 0x3D];
 const GREY: [u8; 3] = [0x8A, 0x8A, 0x8A];
 const WHITE: [u8; 3] = [0xFF, 0xFF, 0xFF];
 const DARK_TEXT: [u8; 3] = [0x1A, 0x1A, 0x1A];
@@ -45,61 +48,34 @@ pub fn render(face: Face, dpi: u32, light_taskbar: bool) -> Icon {
             low,
             stale,
         } => {
-            let plain = if stale {
-                GREY
-            } else if light_taskbar {
-                DARK_TEXT
-            } else {
-                WHITE
+            let colour = match (charging, low, light_taskbar) {
+                (true, _, false) => CHARGING_ON_DARK,
+                (true, _, true) => CHARGING_ON_LIGHT,
+                (false, true, false) => LOW_ON_DARK,
+                (false, true, true) => LOW_ON_LIGHT,
+                _ if stale => GREY,
+                (false, false, true) => DARK_TEXT,
+                (false, false, false) => WHITE,
             };
-            digits(percent, charging, low, dpi, plain)
+            digits(percent, dpi, colour)
         }
     };
     Icon::from_rgba(rgba, size as u32, size as u32).expect("icon buffer matches its size")
 }
 
-/// The battery percentage as digits: on a green fill while charging, an orange-red fill when
-/// low, and otherwise alone in `plain`. Returns straight-alpha RGBA pixels and the edge
-/// length.
-fn digits(percent: u8, charging: bool, low: bool, dpi: u32, plain: [u8; 3]) -> (Vec<u8>, usize) {
+/// The battery percentage as digits in `colour`. Returns straight-alpha RGBA pixels and the
+/// edge length.
+fn digits(percent: u8, dpi: u32, colour: [u8; 3]) -> (Vec<u8>, usize) {
     let size = icon_size(dpi);
-    let (fill, colour) = if charging {
-        (Some(CHARGING_FILL), WHITE)
-    } else if low {
-        (Some(LOW_FILL), WHITE)
-    } else {
-        (None, plain)
-    };
-
-    let s = size as f32;
-    let (max_w, max_h) = match fill {
-        Some(_) => (s - 2.0 * (s / 16.0).ceil(), s * 0.7),
-        None => (s, s * 0.8),
-    };
-    let glyphs = Glyphs::fit(&percent.to_string(), size, max_w as usize, max_h as usize);
-
+    let glyphs = Glyphs::fit(&percent.to_string(), size, size, size * 4 / 5);
     let mut rgba = vec![0u8; size * size * 4];
-    let radius = s * 0.19;
     let ox = (size - glyphs.width) / 2;
     let oy = (size - glyphs.height) / 2;
-    for y in 0..size {
-        for x in 0..size {
-            let coverage =
-                if (ox..ox + glyphs.width).contains(&x) && (oy..oy + glyphs.height).contains(&y) {
-                    f32::from(glyphs.coverage[(y - oy) * glyphs.width + (x - ox)]) / 255.0
-                } else {
-                    0.0
-                };
-            let (rgb, alpha) = match fill {
-                Some(fill) => (
-                    blend(fill, colour, coverage),
-                    rounded_rect_alpha(x, y, s, radius),
-                ),
-                None => (colour, coverage),
-            };
-            let pixel = &mut rgba[(y * size + x) * 4..][..4];
-            pixel[..3].copy_from_slice(&rgb);
-            pixel[3] = (alpha * 255.0).round() as u8;
+    for y in 0..glyphs.height {
+        for x in 0..glyphs.width {
+            let pixel = &mut rgba[((y + oy) * size + x + ox) * 4..][..4];
+            pixel[..3].copy_from_slice(&colour);
+            pixel[3] = glyphs.coverage[y * glyphs.width + x];
         }
     }
     (rgba, size)
@@ -159,20 +135,6 @@ fn battery_glyph(dpi: u32, crossed: bool) -> (Vec<u8>, usize) {
         }
     }
     (rgba, size)
-}
-
-fn blend(base: [u8; 3], top: [u8; 3], t: f32) -> [u8; 3] {
-    std::array::from_fn(|i| (f32::from(base[i]) * (1.0 - t) + f32::from(top[i]) * t).round() as u8)
-}
-
-/// Anti-aliased coverage of the pixel at (x, y) by a rounded square filling the icon.
-fn rounded_rect_alpha(x: usize, y: usize, size: f32, radius: f32) -> f32 {
-    let half = size / 2.0;
-    let inner = half - radius;
-    let dx = ((x as f32 + 0.5 - half).abs() - inner).max(0.0);
-    let dy = ((y as f32 + 0.5 - half).abs() - inner).max(0.0);
-    let distance = (dx * dx + dy * dy).sqrt() - radius;
-    (0.5 - distance).clamp(0.0, 1.0)
 }
 
 /// Text rasterised as an 8-bit coverage mask cropped to its ink.

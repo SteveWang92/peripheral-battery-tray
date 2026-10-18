@@ -48,9 +48,9 @@ pub struct Strings {
     pub supported: &'static str,
     pub no_response: &'static str,
     pub asleep: &'static str,
-    asleep_last: &'static str,
+    asleep_short: &'static str,
     row_asleep: &'static str,
-    battery: &'static str,
+    pub card_title: &'static str,
     charging: &'static str,
     not_charging: &'static str,
     updated: &'static str,
@@ -84,10 +84,11 @@ impl Strings {
         }
     }
 
+    /// The connection's short name, for the menu.
     pub fn connection(&self, connection: Connection) -> &'static str {
         match connection {
             Connection::Rog(rog_battery::Connection::OmniReceiver) => "OMNI",
-            Connection::Rog(rog_battery::Connection::Receiver) => self.receiver,
+            Connection::Rog(rog_battery::Connection::Receiver) => "2.4 GHz",
             Connection::Rog(rog_battery::Connection::Wired) => self.wired,
             Connection::Logitech(logitech_battery::Connection::Lightspeed) => "Lightspeed",
             Connection::Logitech(logitech_battery::Connection::Unifying) => "Unifying",
@@ -95,17 +96,30 @@ impl Strings {
         }
     }
 
-    /// The card's battery line.
-    pub fn battery_line(&self, percent: u8, charging: bool) -> String {
+    /// The connection in full, for the card.
+    pub fn connection_detail(&self, connection: Connection) -> String {
+        match connection {
+            Connection::Rog(rog_battery::Connection::Wired) => self.wired.to_owned(),
+            _ => fill(self.receiver, &[self.connection(connection)]),
+        }
+    }
+
+    /// The card's status line under a device's battery bar.
+    pub fn live_status(&self, charging: bool, time: &str) -> String {
         let state = if charging {
             self.charging
         } else {
             self.not_charging
         };
-        format!("{} {percent}% · {state}", self.battery)
+        format!("{state} · {}", self.updated_at(time))
     }
 
-    /// The menu row's right-hand column.
+    /// The card's status line for a device asleep since its last reading at `time`.
+    pub fn asleep_status(&self, time: &str) -> String {
+        format!("{} · {}", self.asleep_short, self.updated_at(time))
+    }
+
+    /// A device's battery in the menu.
     pub fn row_status(&self, percent: u8, charging: bool) -> String {
         if charging {
             format!("{percent}% {}", self.charging)
@@ -114,17 +128,12 @@ impl Strings {
         }
     }
 
-    /// The card's line for a device asleep since its last reading at `time`.
-    pub fn asleep_line(&self, percent: u8, time: &str) -> String {
-        fill(self.asleep_last, &[&percent.to_string(), time])
-    }
-
-    /// The menu row's right-hand column for a device asleep since its last reading.
+    /// A device's battery in the menu, asleep since its last reading.
     pub fn row_asleep(&self, percent: u8) -> String {
         fill(self.row_asleep, &[&percent.to_string()])
     }
 
-    pub fn updated_at(&self, time: &str) -> String {
+    fn updated_at(&self, time: &str) -> String {
         fill(self.updated, &[time])
     }
 
@@ -161,13 +170,13 @@ static EN: Strings = Strings {
     supported: "Supported devices…",
     no_response: "No response",
     asleep: "Asleep or not responding",
-    asleep_last: "Asleep · last read {}% at {}",
+    asleep_short: "Asleep",
     row_asleep: "{}% asleep",
-    battery: "Battery",
+    card_title: "Device battery",
     charging: "charging",
     not_charging: "not charging",
     updated: "Updated {}",
-    receiver: "receiver",
+    receiver: "{} receiver",
     wired: "wired",
     low_title: "{} battery low",
     low_body: "{}% left. Charge it soon.",
@@ -197,13 +206,13 @@ static ZH: Strings = Strings {
     supported: "查看支持的设备…",
     no_response: "未响应",
     asleep: "休眠或未响应",
-    asleep_last: "休眠中 · 上次电量 {}%（{}）",
+    asleep_short: "休眠中",
     row_asleep: "{}% 休眠",
-    battery: "电量",
+    card_title: "设备电量",
     charging: "充电中",
     not_charging: "未充电",
     updated: "{} 更新",
-    receiver: "接收器",
+    receiver: "{} 接收器",
     wired: "有线",
     low_title: "{} 电量低",
     low_body: "剩余 {}%，请及时充电。",

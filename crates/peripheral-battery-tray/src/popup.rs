@@ -1,6 +1,7 @@
-//! The card a left click on a tray icon shows: the icon's devices, their battery and when
-//! they were read. It is drawn here rather than left to the shell's tooltip, which appears
-//! only after a hover delay and holds at most 128 characters.
+//! The card a left click on a tray icon shows: a title with a refresh button, then a panel
+//! per device with its battery as a percentage and a bar, its connection, and when it was
+//! read. It is drawn here rather than left to the shell's tooltip, which appears only after
+//! a hover delay and holds at most 128 characters.
 //!
 //! The card closes when it loses activation (a click anywhere else), on Escape, or on a
 //! second click on its icon.
@@ -14,10 +15,11 @@ use windows_sys::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontIndirectW, CreateSolidBrush, DT_CALCRECT, DT_NOPREFIX, DT_SINGLELINE,
-    DeleteObject, DrawTextW, EndPaint, FW_SEMIBOLD, FillRect, GetDC, GetMonitorInfoW, HDC, HFONT,
-    InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT,
-    ReleaseDC, SelectObject, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
+    BeginPaint, CreateFontIndirectW, CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_NOPREFIX,
+    DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, EndPaint, FW_SEMIBOLD, FillRect, GetDC,
+    GetMonitorInfoW, GetStockObject, HDC, HFONT, InvalidateRect, MONITOR_DEFAULTTONEAREST,
+    MONITORINFO, MonitorFromPoint, NULL_PEN, PAINTSTRUCT, ReleaseDC, RoundRect, SelectObject,
+    SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::SystemParametersInfoForDpi;
@@ -25,17 +27,38 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, HWND_TOPMOST, IsWindowVisible,
     NONCLIENTMETRICSW, RegisterClassW, SPI_GETNONCLIENTMETRICS, SW_HIDE, SWP_SHOWWINDOW,
-    SetForegroundWindow, SetWindowPos, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_KEYDOWN, WM_PAINT,
-    WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetForegroundWindow, SetWindowPos, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_KEYDOWN,
+    WM_LBUTTONUP, WM_PAINT, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 /// What one icon's card shows.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Card {
-    /// Each device's name line and status line; an empty status draws no line.
-    pub sections: Vec<(String, String)>,
-    /// A dimmed last line; empty draws none.
-    pub footer: String,
+    pub title: String,
+    pub panels: Vec<Panel>,
+    /// Shown in place of the panels when there are none.
+    pub empty: String,
+}
+
+/// One device on the card.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Panel {
+    pub name: String,
+    pub connection: String,
+    /// `None` when nothing has been read from the device yet.
+    pub percent: Option<u8>,
+    pub tone: Tone,
+    pub status: String,
+}
+
+/// The colour of a device's battery bar.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Normal,
+    Low,
+    Charging,
+    /// The last reading of a device now asleep.
+    Stale,
 }
 
 /// The icon a card is shown for, in physical pixels.
@@ -65,12 +88,20 @@ struct State {
     shown: Option<Shown>,
     /// The slot whose card last closed by losing activation, and when.
     closed: Option<(usize, Instant)>,
+    /// The refresh button, in client coordinates.
+    button: Option<RECT>,
+    on_refresh: Option<Box<dyn Fn()>>,
 }
 
 thread_local! {
     /// Kept apart from the tray's state: the window procedure runs inside Win32 calls the
     /// tray makes while it holds its own.
     static STATE: RefCell<State> = RefCell::new(State::default());
+}
+
+/// Sets what the refresh button does.
+pub fn on_refresh(action: impl Fn() + 'static) {
+    STATE.with_borrow_mut(|state| state.on_refresh = Some(Box::new(action)));
 }
 
 /// Opens the card for icon `slot`, or closes it if that card is already showing.
@@ -194,6 +225,18 @@ unsafe extern "system" fn window_proc(
             paint(hwnd);
             0
         }
+        WM_LBUTTONUP => {
+            let (x, y) = (lparam as i16 as i32, (lparam >> 16) as i16 as i32);
+            STATE.with_borrow(|state| {
+                let hit = state.button.is_some_and(|b| {
+                    (b.left..b.right).contains(&x) && (b.top..b.bottom).contains(&y)
+                });
+                if let (true, Some(action)) = (hit, &state.on_refresh) {
+                    action();
+                }
+            });
+            0
+        }
         WM_ACTIVATE if (wparam & 0xFFFF) as u32 == WA_INACTIVE => {
             STATE.with_borrow_mut(|state| {
                 state.closed = state.shown.as_ref().map(|s| (s.slot, Instant::now()));
@@ -212,6 +255,8 @@ unsafe extern "system" fn window_proc(
 struct Palette {
     background: COLORREF,
     border: COLORREF,
+    panel: COLORREF,
+    track: COLORREF,
     text: COLORREF,
     dim: COLORREF,
 }
@@ -223,6 +268,8 @@ fn palette(light: bool) -> Palette {
         Palette {
             background: 0x00F9F9F9,
             border: 0x00E0E0E0,
+            panel: 0x00EDEDED,
+            track: 0x00D4D4D4,
             text: 0x001A1A1A,
             dim: 0x00606060,
         }
@@ -230,16 +277,31 @@ fn palette(light: bool) -> Palette {
         Palette {
             background: 0x002C2C2C,
             border: 0x00484848,
+            panel: 0x00383838,
+            track: 0x00505050,
             text: 0x00FFFFFF,
-            dim: 0x00C0C0C0,
+            dim: 0x00B4B4B4,
         }
     }
 }
 
-/// The system message font at the card's DPI, regular and semibold.
+/// The bar's fill: the text colour normally, and the tray icon's colours otherwise.
+fn bar_colour(tone: Tone, colors: &Palette) -> COLORREF {
+    match tone {
+        Tone::Normal => colors.text,
+        Tone::Low => 0x000C58EA,
+        Tone::Charging => 0x005EC522,
+        Tone::Stale => 0x008A8A8A,
+    }
+}
+
+/// The system message font at the card's DPI in the sizes the card uses.
 struct Fonts {
-    regular: HFONT,
-    semibold: HFONT,
+    small: HFONT,
+    name: HFONT,
+    title: HFONT,
+    percent: HFONT,
+    glyph: HFONT,
 }
 
 impl Fonts {
@@ -255,73 +317,171 @@ impl Fonts {
                 dpi,
             );
         }
-        let mut font = metrics.lfMessageFont;
-        let regular = unsafe { CreateFontIndirectW(&font) };
-        font.lfWeight = FW_SEMIBOLD as i32;
-        let semibold = unsafe { CreateFontIndirectW(&font) };
-        Fonts { regular, semibold }
+        let base = metrics.lfMessageFont;
+        let make = |scale: f32, weight: i32, face: Option<&str>| {
+            let mut font = base;
+            font.lfHeight = (base.lfHeight as f32 * scale).round() as i32;
+            font.lfWeight = weight;
+            if let Some(face) = face {
+                font.lfFaceName = [0; 32];
+                for (slot, unit) in font.lfFaceName.iter_mut().zip(face.encode_utf16()) {
+                    *slot = unit;
+                }
+            }
+            unsafe { CreateFontIndirectW(&font) }
+        };
+        let semibold = FW_SEMIBOLD as i32;
+        Fonts {
+            small: make(1.0, base.lfWeight, None),
+            name: make(1.15, semibold, None),
+            title: make(1.2, semibold, None),
+            percent: make(1.85, semibold, None),
+            glyph: make(1.15, base.lfWeight, Some("Segoe MDL2 Assets")),
+        }
     }
 }
 
 impl Drop for Fonts {
     fn drop(&mut self) {
         unsafe {
-            DeleteObject(self.regular);
-            DeleteObject(self.semibold);
+            DeleteObject(self.small);
+            DeleteObject(self.name);
+            DeleteObject(self.title);
+            DeleteObject(self.percent);
+            DeleteObject(self.glyph);
         }
     }
 }
 
-#[derive(Clone, Copy)]
-enum Style {
-    Title,
-    Body,
-    Dim,
+/// The refresh glyph in Segoe MDL2 Assets.
+const REFRESH_GLYPH: &str = "\u{E72C}";
+
+/// Where everything on the card goes, in client coordinates.
+struct Layout {
+    width: i32,
+    height: i32,
+    title: RECT,
+    button: RECT,
+    panels: Vec<PanelLayout>,
+    empty: RECT,
 }
 
-/// One line of the card and the space above it, in physical pixels.
-struct Line<'a> {
-    text: &'a str,
-    style: Style,
-    gap: i32,
+struct PanelLayout {
+    frame: RECT,
+    name: RECT,
+    percent: RECT,
+    connection: RECT,
+    bar: RECT,
+    status: RECT,
 }
 
-fn lines(card: &Card, scale: impl Fn(i32) -> i32) -> Vec<Line<'_>> {
-    let mut lines = Vec::new();
-    for (i, (name, status)) in card.sections.iter().enumerate() {
-        let gap = if i == 0 { 0 } else { scale(8) };
-        lines.push(Line {
-            text: name,
-            style: Style::Title,
-            gap,
-        });
-        if !status.is_empty() {
-            lines.push(Line {
-                text: status,
-                style: Style::Body,
-                gap: scale(2),
-            });
-        }
+fn rect(left: i32, top: i32, (width, height): (i32, i32)) -> RECT {
+    RECT {
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
     }
-    if !card.footer.is_empty() {
-        lines.push(Line {
-            text: &card.footer,
-            style: Style::Dim,
-            gap: if lines.is_empty() { 0 } else { scale(8) },
-        });
-    }
-    lines
 }
 
-fn font_for(fonts: &Fonts, style: Style) -> HFONT {
-    match style {
-        Style::Title => fonts.semibold,
-        Style::Body | Style::Dim => fonts.regular,
+fn percent_text(percent: Option<u8>) -> String {
+    percent.map_or_else(|| "—".to_owned(), |p| format!("{p}%"))
+}
+
+fn layout(dc: HDC, fonts: &Fonts, card: &Card, dpi: u32) -> Layout {
+    let scale = |px: i32| px * dpi as i32 / 96;
+    let (pad, inner_x, inner_y) = (scale(16), scale(14), scale(12));
+    let button_size = scale(30);
+    let size = |font: HFONT, text: &str| {
+        unsafe { SelectObject(dc, font) };
+        measure(dc, &wide(text))
+    };
+
+    let title = size(fonts.title, &card.title);
+    let measured: Vec<_> = card
+        .panels
+        .iter()
+        .map(|panel| {
+            (
+                size(fonts.name, &panel.name),
+                size(fonts.percent, &percent_text(panel.percent)),
+                size(fonts.small, &panel.connection),
+                size(fonts.small, &panel.status),
+            )
+        })
+        .collect();
+    let empty = size(fonts.small, &card.empty);
+    let content = measured
+        .iter()
+        .map(|&(name, percent, connection, status)| {
+            (name.0 + scale(24) + percent.0)
+                .max(connection.0)
+                .max(status.0)
+        })
+        .max()
+        .unwrap_or(empty.0)
+        .max(scale(230));
+    let panel_width = content + 2 * inner_x;
+    let width = panel_width.max(title.0 + scale(16) + button_size) + 2 * pad;
+
+    let mut y = pad;
+    let title_rect = rect(pad, y + (button_size - title.1) / 2, title);
+    let button = rect(width - pad - button_size, y, (button_size, button_size));
+    y += button_size + scale(12);
+
+    let mut panels = Vec::new();
+    for &(name, percent, connection, status) in &measured {
+        let left = pad + inner_x;
+        let top = y + inner_y;
+        let row = name.1.max(percent.1);
+        // Bottoms aligned, so the name sits on the percentage's baseline.
+        let name_rect = rect(left, top + row - name.1, name);
+        let percent_rect = rect(left + content - percent.0, top + row - percent.1, percent);
+        let connection_rect = rect(left, top + row + scale(2), connection);
+        let bar = rect(
+            left,
+            connection_rect.bottom + scale(10),
+            (content, scale(6)),
+        );
+        let status_rect = rect(left, bar.bottom + scale(10), status);
+        let frame = RECT {
+            left: pad,
+            top: y,
+            right: pad + panel_width,
+            bottom: status_rect.bottom + inner_y,
+        };
+        y = frame.bottom + scale(10);
+        panels.push(PanelLayout {
+            frame,
+            name: name_rect,
+            percent: percent_rect,
+            connection: connection_rect,
+            bar,
+            status: status_rect,
+        });
+    }
+    let empty_rect = rect(pad, y, empty);
+    let height = if panels.is_empty() {
+        empty_rect.bottom + pad
+    } else {
+        y - scale(10) + pad
+    };
+    Layout {
+        width,
+        height,
+        title: title_rect,
+        button,
+        panels,
+        empty: empty_rect,
     }
 }
 
 /// Measures `text` in the font selected into `dc`.
 fn measure(dc: HDC, text: &[u16]) -> (i32, i32) {
+    // DrawTextW reads the pointer even for no characters, and an empty Vec's is dangling.
+    if text.is_empty() {
+        return (0, 0);
+    }
     let mut rect = RECT {
         left: 0,
         top: 0,
@@ -344,7 +504,7 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
 }
 
-/// Sizes the card to its text and puts it beside its icon, inside the icon's monitor's
+/// Sizes the card to its content and puts it beside its icon, inside the icon's monitor's
 /// work area: above a bottom taskbar, below a top one, beside a side one, and above an icon
 /// in the overflow area.
 fn place(hwnd: HWND) {
@@ -364,23 +524,17 @@ fn place(hwnd: HWND) {
         );
     }
     let scale = |px: i32| px * dpi as i32 / 96;
-    let (pad_x, pad_y) = (scale(12), scale(10));
     let fonts = Fonts::new(dpi);
-    let (mut width, mut height) = (0, 0);
-    unsafe {
+    let layout = unsafe {
         let dc = GetDC(hwnd);
-        let original = SelectObject(dc, fonts.regular);
-        for line in lines(&card, scale) {
-            SelectObject(dc, font_for(&fonts, line.style));
-            let (w, h) = measure(dc, &wide(line.text));
-            width = width.max(w);
-            height += line.gap + h;
-        }
+        let original = SelectObject(dc, fonts.small);
+        let layout = layout(dc, &fonts, &card, dpi);
         SelectObject(dc, original);
         ReleaseDC(hwnd, dc);
-    }
-    let width = width.max(scale(140)) + 2 * pad_x;
-    let height = height + 2 * pad_y;
+        layout
+    };
+    STATE.with_borrow_mut(|state| state.button = Some(layout.button));
+    let (width, height) = (layout.width, layout.height);
 
     let center = POINT {
         x: anchor.x + anchor.width / 2,
@@ -446,6 +600,45 @@ fn cloak(hwnd: HWND, on: bool) {
     }
 }
 
+/// Fills `area` with `colour`, its corners rounded by `radius`.
+fn rounded(dc: HDC, area: RECT, radius: i32, colour: COLORREF) {
+    unsafe {
+        let brush = CreateSolidBrush(colour);
+        let old_brush = SelectObject(dc, brush);
+        let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        // Without a pen the shape stops one pixel short of its right and bottom edges.
+        RoundRect(
+            dc,
+            area.left,
+            area.top,
+            area.right + 1,
+            area.bottom + 1,
+            2 * radius,
+            2 * radius,
+        );
+        SelectObject(dc, old_pen);
+        SelectObject(dc, old_brush);
+        DeleteObject(brush);
+    }
+}
+
+fn text(dc: HDC, text: &str, mut area: RECT, font: HFONT, colour: COLORREF, centred: bool) {
+    if text.is_empty() {
+        return;
+    }
+    let text = wide(text);
+    let format = if centred {
+        DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER
+    } else {
+        DT_SINGLELINE | DT_NOPREFIX
+    };
+    unsafe {
+        SelectObject(dc, font);
+        SetTextColor(dc, colour);
+        DrawTextW(dc, text.as_ptr(), text.len() as i32, &mut area, format);
+    }
+}
+
 fn paint(hwnd: HWND) {
     let mut ps: PAINTSTRUCT = unsafe { std::mem::zeroed() };
     let dc = unsafe { BeginPaint(hwnd, &mut ps) };
@@ -463,38 +656,73 @@ fn paint(hwnd: HWND) {
         let dpi = shown.dpi;
         let scale = |px: i32| px * dpi as i32 / 96;
         let fonts = Fonts::new(dpi);
-        let original = unsafe { SelectObject(dc, fonts.regular) };
-        let (x, mut y) = (scale(12), scale(10));
-        for line in lines(&shown.card, scale) {
-            let text = wide(line.text);
-            unsafe {
-                SelectObject(dc, font_for(&fonts, line.style));
-                SetTextColor(
-                    dc,
-                    match line.style {
-                        Style::Dim => colors.dim,
-                        Style::Title | Style::Body => colors.text,
-                    },
-                );
-            }
-            let (w, h) = measure(dc, &text);
-            y += line.gap;
-            let mut rect = RECT {
-                left: x,
-                top: y,
-                right: x + w,
-                bottom: y + h,
+        let original = unsafe { SelectObject(dc, fonts.small) };
+        let card = &shown.card;
+        let layout = layout(dc, &fonts, card, dpi);
+
+        text(
+            dc,
+            &card.title,
+            layout.title,
+            fonts.title,
+            colors.text,
+            false,
+        );
+        rounded(dc, layout.button, scale(6), colors.panel);
+        text(
+            dc,
+            REFRESH_GLYPH,
+            layout.button,
+            fonts.glyph,
+            colors.text,
+            true,
+        );
+        if card.panels.is_empty() {
+            text(
+                dc,
+                &card.empty,
+                layout.empty,
+                fonts.small,
+                colors.dim,
+                false,
+            );
+        }
+        for (panel, at) in card.panels.iter().zip(&layout.panels) {
+            rounded(dc, at.frame, scale(8), colors.panel);
+            text(dc, &panel.name, at.name, fonts.name, colors.text, false);
+            let percent_colour = if panel.tone == Tone::Stale {
+                colors.dim
+            } else {
+                colors.text
             };
-            unsafe {
-                DrawTextW(
-                    dc,
-                    text.as_ptr(),
-                    text.len() as i32,
-                    &mut rect,
-                    DT_SINGLELINE | DT_NOPREFIX,
-                );
+            text(
+                dc,
+                &percent_text(panel.percent),
+                at.percent,
+                fonts.percent,
+                percent_colour,
+                false,
+            );
+            text(
+                dc,
+                &panel.connection,
+                at.connection,
+                fonts.small,
+                colors.dim,
+                false,
+            );
+            let radius = (at.bar.bottom - at.bar.top) / 2;
+            rounded(dc, at.bar, radius, colors.track);
+            if let Some(percent) = panel.percent.filter(|&p| p > 0) {
+                let full = at.bar.right - at.bar.left;
+                let filled = (full * i32::from(percent.min(100)) / 100).max(2 * radius);
+                let fill = RECT {
+                    right: at.bar.left + filled,
+                    ..at.bar
+                };
+                rounded(dc, fill, radius, bar_colour(panel.tone, &colors));
             }
-            y += h;
+            text(dc, &panel.status, at.status, fonts.small, colors.dim, false);
         }
         unsafe { SelectObject(dc, original) };
     });

@@ -13,8 +13,10 @@ on `main`, with the matching section below as its notes.
 - Tray icon per device showing battery digits, coloured when low or charging.
 - A sleeping or switched-off device shows its last battery reading, greyed out.
 - Grey crossed-out battery icon when no supported device is found.
-- Clicking an icon shows device, battery, charging state and last update time.
+- Clicking an icon shows each device's battery bar, connection and last update.
+- Right-click menu lists each device with its connection and battery on a second line.
 - Right-click menu for refresh, low-battery threshold, refresh interval and merged icon.
+- A sudden battery drop is shown only once a second reading confirms it.
 - Optional battery log, switched on from the tray menu.
 - Toasts when a device runs low and, optionally, when charging completes.
 - Settings are saved and restored across restarts.

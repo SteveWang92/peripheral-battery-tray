@@ -23,8 +23,7 @@ pinned to one of that repository's release tags.
 - Planned work and progress live in the maintainer's untracked `PLAN.local.md`, not in
   GitHub issues. Read it before starting work when it is present; do not open issues for
   planned work.
-- The repository is private. Only the maintainer decides when it becomes public; never
-  change its visibility.
+- The repository is public. Only the maintainer decides its visibility; never change it.
 
 ## Relationship to rog-battery-tray
 

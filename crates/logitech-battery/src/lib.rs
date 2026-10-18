@@ -170,6 +170,12 @@ impl Device {
         self.connection
     }
 
+    /// The receiver's HID path and the device's slot on it, which tell identical devices
+    /// apart for as long as the receiver stays in the same port.
+    pub fn id(&self) -> String {
+        format!("{}#{}", self.short_path.to_string_lossy(), self.index)
+    }
+
     pub fn read_battery(&self, api: &HidApi) -> Result<Reading, HidError> {
         let channel = Channel::open(api, &self.short_path, &self.long_path)?;
         let battery = match self.battery.get() {
@@ -291,26 +297,8 @@ fn voltage_percent(millivolts: u16) -> u8 {
 /// Finds every device paired to a supported receiver, including one that is switched off:
 /// it reads as asleep until it answers.
 pub fn discover(api: &HidApi) -> Vec<Device> {
-    let logitech: Vec<&DeviceInfo> = api
-        .device_list()
-        .filter(|info| info.vendor_id() == LOGITECH_VID)
-        .collect();
     let mut devices = Vec::new();
-    for short in &logitech {
-        let Some(&(_, connection)) = RECEIVERS.iter().find(|(pid, _)| *pid == short.product_id())
-        else {
-            continue;
-        };
-        if !is_collection(short, SHORT_USAGE) {
-            continue;
-        }
-        let Some(long) = logitech.iter().find(|info| {
-            info.product_id() == short.product_id()
-                && is_collection(info, LONG_USAGE)
-                && instance(info.path()) == instance(short.path())
-        }) else {
-            continue;
-        };
+    for (connection, short, long) in receivers(api) {
         let Ok(channel) = Channel::open(api, short.path(), long.path()) else {
             continue;
         };
@@ -341,9 +329,57 @@ pub fn discover(api: &HidApi) -> Vec<Device> {
         }
     }
     // HID enumeration order can change after a replug; callers that show one entry per
-    // device get the same order every time.
-    devices.sort_by_cached_key(|device| (device.name(), device.connection));
+    // device get the same order every time, identical devices included.
+    devices.sort_by_cached_key(|device| {
+        (
+            device.name(),
+            device.connection,
+            device.short_path.clone(),
+            device.index,
+        )
+    });
     devices
+}
+
+/// Every paired slot of every supported receiver, as its receiver path and slot. Only the
+/// receivers are asked, so nothing goes over the air; the list changes when a device is
+/// paired or unpaired, or a receiver is plugged in or removed. A receiver that cannot be read
+/// fails the whole list, since leaving it out would look like an unpairing.
+pub fn pairings(api: &HidApi) -> Result<Vec<(CString, u8)>, HidError> {
+    let mut pairings = Vec::new();
+    for (connection, short, long) in receivers(api) {
+        let channel = Channel::open(api, short.path(), long.path())?;
+        for index in SLOTS {
+            if paired_name(&channel, connection, index)?.is_some() {
+                pairings.push((short.path().to_owned(), index));
+            }
+        }
+    }
+    pairings.sort();
+    Ok(pairings)
+}
+
+/// Each supported receiver's connection and its short and long HID++ collections.
+fn receivers(api: &HidApi) -> Vec<(Connection, &DeviceInfo, &DeviceInfo)> {
+    let logitech: Vec<&DeviceInfo> = api
+        .device_list()
+        .filter(|info| info.vendor_id() == LOGITECH_VID)
+        .collect();
+    logitech
+        .iter()
+        .filter(|short| is_collection(short, SHORT_USAGE))
+        .filter_map(|short| {
+            let &(_, connection) = RECEIVERS
+                .iter()
+                .find(|(pid, _)| *pid == short.product_id())?;
+            let long = logitech.iter().find(|info| {
+                info.product_id() == short.product_id()
+                    && is_collection(info, LONG_USAGE)
+                    && instance(info.path()) == instance(short.path())
+            })?;
+            Some((connection, *short, *long))
+        })
+        .collect()
 }
 
 fn is_collection(info: &DeviceInfo, usage: u16) -> bool {

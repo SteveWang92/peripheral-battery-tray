@@ -3,6 +3,7 @@
 //! to the log file.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -14,7 +15,6 @@ use chrono::{DateTime, Local};
 use logitech_battery::HidApi;
 
 const ASUS_VID: u16 = 0x0B05;
-const LOGITECH_VID: u16 = 0x046D;
 
 /// A drop larger than this between two readings, while not charging, is held back until the
 /// next reading confirms it: a G502 X reported 50% for one reading after being unplugged
@@ -80,8 +80,21 @@ impl From<logitech_battery::Reading> for Reading {
 pub struct DeviceStatus {
     pub name: String,
     pub connection: Connection,
+    /// Tells devices apart: the model name for ROG, whose receiver and cable entries are one
+    /// device; the receiver path and slot for Logitech, whose identical devices each have
+    /// their own slot.
+    pub id: String,
     /// A failed query counts as not responding; its error goes to the log.
     pub reading: Reading,
+}
+
+/// Identifies one device across snapshots.
+pub type DeviceKey = (String, Connection);
+
+impl DeviceStatus {
+    pub fn key(&self) -> DeviceKey {
+        (self.id.clone(), self.connection)
+    }
 }
 
 pub struct Snapshot {
@@ -111,7 +124,7 @@ pub fn spawn(
             rog: Vec::new(),
             rog_paths: Vec::new(),
             logitech: Vec::new(),
-            logitech_paths: Vec::new(),
+            logitech_pairings: Vec::new(),
             shown: HashMap::new(),
             doubted: HashSet::new(),
             log: None,
@@ -127,12 +140,12 @@ struct Poller {
     /// The ASUS HID paths present at the last ROG discovery.
     rog_paths: Vec<String>,
     logitech: Vec<logitech_battery::Device>,
-    /// The Logitech HID paths present at the last Logitech discovery.
-    logitech_paths: Vec<String>,
+    /// The receiver pairings present at the last Logitech discovery.
+    logitech_pairings: Vec<(CString, u8)>,
     /// Each device's last battery percentage passed on to the tray.
-    shown: HashMap<(String, Connection), u8>,
+    shown: HashMap<DeviceKey, u8>,
     /// Devices whose last reading was a sudden drop that was held back.
-    doubted: HashSet<(String, Connection)>,
+    doubted: HashSet<DeviceKey>,
     log: Option<File>,
 }
 
@@ -165,9 +178,10 @@ impl Poller {
     }
 
     fn poll(&mut self) -> Snapshot {
-        // Discovery probes every candidate interface, so each brand's runs only when its set
-        // of HID interfaces changes or one of its queries failed; otherwise a round sends
-        // exactly one battery query per device.
+        // Discovery probes every device over the air, so each brand's runs only when its
+        // set of HID interfaces or receiver pairings changes, or one of its queries failed;
+        // otherwise a round sends one battery query per device, plus a pairing read per
+        // receiver slot that the receiver answers itself.
         if let Err(error) = self.api.refresh_devices() {
             self.log_line(&format!("device refresh failed: {error}"));
         }
@@ -176,10 +190,20 @@ impl Poller {
             self.rog = rog_battery::discover(&self.api);
             self.rog_paths = rog_paths;
         }
-        let logitech_paths = self.paths(LOGITECH_VID);
-        if self.logitech.is_empty() || logitech_paths != self.logitech_paths {
+        // A device paired to a receiver already plugged in changes no HID path. Pairings
+        // that cannot be read count as unchanged.
+        let pairings = logitech_battery::pairings(&self.api);
+        if let Err(error) = &pairings {
+            self.log_line(&format!("receiver pairing read failed: {error}"));
+        }
+        let paired_anew = pairings
+            .as_ref()
+            .is_ok_and(|pairings| *pairings != self.logitech_pairings);
+        if self.logitech.is_empty() || paired_anew {
             self.logitech = logitech_battery::discover(&self.api);
-            self.logitech_paths = logitech_paths;
+        }
+        if let Ok(pairings) = pairings {
+            self.logitech_pairings = pairings;
         }
         if self.rog.is_empty() && self.logitech.is_empty() {
             self.log_line("no supported device found");
@@ -201,6 +225,7 @@ impl Poller {
             rog_failed |= result.is_err();
             let status = DeviceStatus {
                 name: name.to_owned(),
+                id: name.to_owned(),
                 connection: Connection::Rog(connection),
                 reading: result.map_or(Reading::Asleep, Reading::from),
             };
@@ -213,7 +238,7 @@ impl Poller {
             let result = device.read_battery(&self.api);
             let elapsed = started.elapsed().as_millis();
             // Read after the query: a device's first answer replaces its shortened name.
-            let (name, connection) = (device.name(), device.connection());
+            let (name, id, connection) = (device.name(), device.id(), device.connection());
             let text = match &result {
                 Ok(reading) => reading.to_string(),
                 Err(error) => format!("query failed: {error}"),
@@ -222,6 +247,7 @@ impl Poller {
             logitech_failed |= result.is_err();
             let status = DeviceStatus {
                 name,
+                id,
                 connection: Connection::Logitech(connection),
                 reading: result.map_or(Reading::Asleep, Reading::from),
             };
@@ -250,7 +276,7 @@ impl Poller {
         else {
             return status;
         };
-        let key = (status.name.clone(), status.connection);
+        let key = status.key();
         let held = self.shown.get(&key).copied().filter(|&shown| {
             !charging && shown.saturating_sub(percent) > SUDDEN_DROP && !self.doubted.contains(&key)
         });

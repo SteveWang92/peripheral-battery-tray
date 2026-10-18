@@ -31,7 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::config::{self, Loaded, Settings};
 use crate::icon::{self, Face};
-use crate::poller::{self, Command, Connection, DeviceStatus, Reading, Snapshot};
+use crate::poller::{self, Command, DeviceKey, DeviceStatus, Reading, Snapshot};
 use crate::popup::{self, Anchor, Card, Panel, Tone};
 use crate::strings::{Language, Strings};
 use crate::system;
@@ -151,11 +151,11 @@ struct Tray {
     cards: Vec<Card>,
     menu: Option<MenuItems>,
     look: Look,
-    /// Alert state per model: a device charging over its cable appears under another
+    /// Alert state per device id: a ROG device charging over its cable appears under another
     /// connection than the receiver it drains on.
     alerts: HashMap<String, Alerts>,
     /// Each device's last battery reading and when it was taken.
-    last_read: HashMap<(String, Connection), (u8, DateTime<Local>)>,
+    last_read: HashMap<DeviceKey, (u8, DateTime<Local>)>,
     /// Set while a menu is showing: the menu and the icons it belongs to cannot be replaced
     /// then, so such changes wait for it to close.
     menu_open: bool,
@@ -174,8 +174,11 @@ pub fn run(api: HidApi) {
         Loaded::Saved(settings) => settings,
         Loaded::FirstRun => {
             let settings = Settings::default();
-            system::set_autostart(true);
-            config::save(&settings);
+            // Without a saved file every launch is a first run, which would switch
+            // autostart back on after the user turned it off.
+            if config::save(&settings) {
+                system::set_autostart(true);
+            }
             settings
         }
         // The file is left as it is until a setting is changed from the menu.
@@ -422,10 +425,7 @@ impl Tray {
             self.raise_alerts(&snapshot);
             for device in &snapshot.devices {
                 if let Reading::Battery { percent, .. } = device.reading {
-                    self.last_read.insert(
-                        (device.name.clone(), device.connection),
-                        (percent, snapshot.at),
-                    );
+                    self.last_read.insert(device.key(), (percent, snapshot.at));
                 }
             }
             self.snapshot = Some(snapshot);
@@ -491,13 +491,13 @@ impl Tray {
 
     fn raise_alerts(&mut self, snapshot: &Snapshot) {
         let strings = self.strings();
-        // A model charging under any connection is charging under all of them; otherwise its
-        // receiver entry would raise the low toast the cable entry re-arms, every round.
-        let charging_models: HashSet<&str> = snapshot
+        // A device charging under any connection is charging under all of them; otherwise
+        // its receiver entry would raise the low toast the cable entry re-arms, every round.
+        let charging_ids: HashSet<&str> = snapshot
             .devices
             .iter()
             .filter(|d| matches!(d.reading, Reading::Battery { charging: true, .. }))
-            .map(|d| d.name.as_str())
+            .map(|d| d.id.as_str())
             .collect();
         for device in &snapshot.devices {
             let Reading::Battery {
@@ -506,11 +506,11 @@ impl Tray {
             else {
                 continue;
             };
-            let alerts = self.alerts.entry(device.name.clone()).or_insert(Alerts {
+            let alerts = self.alerts.entry(device.id.clone()).or_insert(Alerts {
                 low_armed: true,
                 full_pending: false,
             });
-            if charging_models.contains(device.name.as_str()) {
+            if charging_ids.contains(device.id.as_str()) {
                 alerts.low_armed = true;
             } else if alerts.low_armed
                 && self.settings.low_threshold().is_some_and(|t| percent <= t)
@@ -683,10 +683,7 @@ impl Tray {
                 charging,
                 estimated,
             },
-            Reading::Asleep => match self
-                .last_read
-                .get(&(device.name.clone(), device.connection))
-            {
+            Reading::Asleep => match self.last_read.get(&device.key()) {
                 Some(&(percent, read_at)) => View::Asleep { percent, read_at },
                 None => View::Unknown,
             },

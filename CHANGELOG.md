@@ -7,6 +7,10 @@ on `main`, with the matching section below as its notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- "Start with Windows" stays off when the settings file cannot be saved.
+
 ## [0.1.0] - 2026-10-18
 
 ### Added

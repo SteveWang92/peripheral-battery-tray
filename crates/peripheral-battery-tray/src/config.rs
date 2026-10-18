@@ -71,16 +71,17 @@ pub fn load() -> Loaded {
     }
 }
 
-/// Writes the settings; a failure leaves the running settings in effect for this session.
-pub fn save(settings: &Settings) {
+/// Writes the settings and tells whether the file was written; a failure leaves the running
+/// settings in effect for this session.
+pub fn save(settings: &Settings) -> bool {
     let Some(path) = path() else {
-        return;
+        return false;
     };
     let Ok(text) = toml::to_string(settings) else {
-        return;
+        return false;
     };
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    let _ = fs::write(path, text);
+    fs::write(path, text).is_ok()
 }

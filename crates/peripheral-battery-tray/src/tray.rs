@@ -174,8 +174,11 @@ pub fn run(api: HidApi) {
         Loaded::Saved(settings) => settings,
         Loaded::FirstRun => {
             let settings = Settings::default();
-            system::set_autostart(true);
-            config::save(&settings);
+            // Without a saved file every launch is a first run, which would switch
+            // autostart back on after the user turned it off.
+            if config::save(&settings) {
+                system::set_autostart(true);
+            }
             settings
         }
         // The file is left as it is until a setting is changed from the menu.
